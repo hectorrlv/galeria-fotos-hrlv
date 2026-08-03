@@ -46,6 +46,30 @@ Antes de publicar la funcionalidad real:
    proyecto de prueba antes del despliegue.
 2. Despliega las reglas revisadas de Database y Storage.
 
+### CORS de Storage
+
+La regeneración del crédito descarga el original privado desde el navegador.
+El bucket debe permitir solicitudes `GET` y `HEAD` desde los dominios de
+Hosting y el servidor local incluidos en `storage.cors.json`.
+
+Esta configuración pertenece al bucket y no se aplica con
+`firebase deploy`. Después de autenticar Google Cloud CLI en el proyecto,
+ejecuta:
+
+```sh
+gcloud storage buckets update \
+  gs://galeria-fotos-hrlv.firebasestorage.app \
+  --cors-file=storage.cors.json
+```
+
+Para verificar la configuración aplicada:
+
+```sh
+gcloud storage buckets describe \
+  gs://galeria-fotos-hrlv.firebasestorage.app \
+  --format='default(cors_config)'
+```
+
 Las reglas reservan `/private` y `/originals` para el administrador. Los
 visitantes solo pueden leer `/public` en Database y Storage.
 

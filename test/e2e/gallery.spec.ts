@@ -142,14 +142,18 @@ test('keeps photo viewer controls and a long caption inside the viewport', async
 
   const bounds = await viewer.evaluate(element => {
     const viewport = element.shadowRoot?.querySelector('.viewer');
+    const image = element.shadowRoot?.querySelector('img');
+    const caption = element.shadowRoot?.querySelector('.caption');
     const targets = [
       element.shadowRoot?.querySelector('.close'),
       element.shadowRoot?.querySelector('.previous'),
       element.shadowRoot?.querySelector('.next'),
-      element.shadowRoot?.querySelector('.caption'),
+      caption,
     ];
     return {
       viewport: viewport?.getBoundingClientRect().toJSON(),
+      image: image?.getBoundingClientRect().toJSON(),
+      caption: caption?.getBoundingClientRect().toJSON(),
       targets: targets.map(target => target?.getBoundingClientRect().toJSON()),
     };
   });
@@ -162,6 +166,7 @@ test('keeps photo viewer controls and a long caption inside the viewport', async
   expect(bounds.viewport?.bottom).toBeLessThanOrEqual(
     page.viewportSize()?.height ?? 0,
   );
+  expect(bounds.image?.bottom).toBeLessThanOrEqual(bounds.caption?.top ?? 0);
   for (const target of bounds.targets) {
     expect(target?.left).toBeGreaterThanOrEqual(0);
     expect(target?.top).toBeGreaterThanOrEqual(0);

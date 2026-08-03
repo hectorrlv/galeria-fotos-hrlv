@@ -7,6 +7,7 @@ import {
 } from 'firebase/database';
 import {
   deleteObject,
+  getBlob,
   getDownloadURL,
   ref as storageRef,
   uploadBytesResumable,
@@ -197,16 +198,42 @@ export class GalleryRepository {
   async getOriginalFile(photo: GalleryPhoto): Promise<File> {
     if (!this.services || !photo.originalPath)
       throw new Error('La fotografía no tiene un original privado disponible.');
-    const url = await getDownloadURL(
-      storageRef(this.services.storage, photo.originalPath),
-    );
-    const response = await fetch(url);
-    if (!response.ok)
-      throw new Error('No fue posible recuperar el original privado.');
-    const blob = await response.blob();
-    return new File([blob], photo.fileName, {
-      type: blob.type || 'image/jpeg',
-    });
+    try {
+      const blob = await getBlob(
+        storageRef(this.services.storage, photo.originalPath),
+      );
+      return new File([blob], photo.fileName, {
+        type: blob.type || 'image/jpeg',
+      });
+    } catch (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'storage/object-not-found'
+      ) {
+        throw new Error(
+          'No se encontró el archivo original privado de esta fotografía.',
+          { cause: error },
+        );
+      }
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        (error.code === 'storage/unauthorized' ||
+          error.code === 'storage/unauthenticated')
+      ) {
+        throw new Error(
+          'La sesión no tiene permiso para descargar el original privado.',
+          { cause: error },
+        );
+      }
+      throw new Error(
+        'No fue posible descargar el original privado. Revisa tu conexión e inténtalo de nuevo.',
+        { cause: error },
+      );
+    }
   }
 
   private upload(

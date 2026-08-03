@@ -49,17 +49,22 @@ export class PhotoViewer extends LitElement {
     }
 
     figure {
+      width: 100%;
+      height: 100%;
       min-width: 0;
       min-height: 0;
       grid-area: 2 / 2;
       display: grid;
       place-items: center;
+      overflow: hidden;
       margin: 0;
     }
 
     img {
-      max-width: 100%;
-      max-height: 100%;
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
       display: block;
       object-fit: contain;
       user-select: none;
@@ -94,8 +99,11 @@ export class PhotoViewer extends LitElement {
 
     .caption {
       grid-area: 3 / 2;
+      box-sizing: border-box;
+      width: 100%;
       min-width: 0;
       max-height: min(30dvh, 10rem);
+      align-self: start;
       display: flex;
       justify-content: space-between;
       gap: 1rem;
