@@ -28,13 +28,19 @@ export class PhotoViewer extends LitElement {
     }
 
     .viewer {
+      box-sizing: border-box;
       width: 100%;
       height: 100%;
+      max-height: 100dvh;
       display: grid;
       grid-template: auto minmax(0, 1fr) auto / auto minmax(0, 1fr) auto;
       align-items: center;
       gap: 0.75rem;
-      padding: clamp(0.75rem, 2vw, 1.5rem);
+      overflow: hidden;
+      padding: max(clamp(0.75rem, 2vw, 1.5rem), env(safe-area-inset-top))
+        max(clamp(0.75rem, 2vw, 1.5rem), env(safe-area-inset-right))
+        max(clamp(0.75rem, 2vw, 1.5rem), env(safe-area-inset-bottom))
+        max(clamp(0.75rem, 2vw, 1.5rem), env(safe-area-inset-left));
     }
 
     .close {
@@ -53,7 +59,7 @@ export class PhotoViewer extends LitElement {
 
     img {
       max-width: 100%;
-      max-height: calc(100vh - 9rem);
+      max-height: 100%;
       display: block;
       object-fit: contain;
       user-select: none;
@@ -88,15 +94,28 @@ export class PhotoViewer extends LitElement {
 
     .caption {
       grid-area: 3 / 2;
+      min-width: 0;
+      max-height: min(30dvh, 10rem);
       display: flex;
       justify-content: space-between;
       gap: 1rem;
       color: #bbb7ae;
       font-size: 0.86rem;
+      overflow: auto;
     }
 
     .caption p {
+      min-width: 0;
       margin: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .caption p:first-child {
+      flex: 1;
+    }
+
+    .caption p:last-child {
+      flex: none;
     }
 
     @media (max-width: 40rem) {

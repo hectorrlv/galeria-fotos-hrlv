@@ -33,6 +33,10 @@ export class AdminPage extends LitElement {
   private error = '';
   private busy = false;
   private uploadProgress = 0;
+  private photoFeedbackId = '';
+  private photoFeedbackMessage = '';
+  private photoFeedbackError = '';
+  private regeneratingPhotoId = '';
   private draggedPhotoId = '';
   private unsubscribeAuth?: () => void;
   private unsubscribeAlbums?: () => void;
@@ -126,6 +130,8 @@ export class AdminPage extends LitElement {
       textarea,
       select {
         width: 100%;
+        min-width: 0;
+        max-width: 100%;
         min-height: 2.8rem;
         padding: 0.65rem 0.75rem;
         border: 1px solid var(--color-border);
@@ -258,6 +264,15 @@ export class AdminPage extends LitElement {
 
       .review-warning {
         color: #f1bd79;
+      }
+
+      .photo-feedback {
+        grid-column: 1 / -1;
+        margin: 0;
+      }
+
+      .photo-feedback.error {
+        color: #ffd8d3;
       }
 
       .preview {
@@ -461,7 +476,13 @@ export class AdminPage extends LitElement {
           <h2>${album.title || 'Nuevo álbum'}</h2>
         </div>
         <div class="actions">
-          <button type="submit" ?disabled=${this.busy}>Guardar borrador</button>
+          <button type="submit" ?disabled=${this.busy}>
+            ${
+              album.status === 'published'
+                ? 'Guardar cambios'
+                : 'Guardar borrador'
+            }
+          </button>
           ${
             album.status === 'published'
               ? html`<button
@@ -654,7 +675,11 @@ export class AdminPage extends LitElement {
             @click=${() => this.regeneratePhoto(photo)}
             ?disabled=${this.busy}
           >
-            Regenerar crédito
+            ${
+              this.regeneratingPhotoId === photo.id
+                ? `Regenerando crédito… ${Math.round(this.uploadProgress * 100)}%`
+                : 'Regenerar crédito'
+            }
           </button>
           <button
             type="button"
@@ -665,6 +690,17 @@ export class AdminPage extends LitElement {
             Eliminar foto
           </button>
         </div>
+        ${
+          this.photoFeedbackId === photo.id && this.photoFeedbackError
+            ? html`<p class="photo-feedback error" role="alert">
+                ${this.photoFeedbackError}
+              </p>`
+            : this.photoFeedbackId === photo.id && this.photoFeedbackMessage
+              ? html`<p class="photo-feedback" role="status">
+                  ${this.photoFeedbackMessage}
+                </p>`
+              : nothing
+        }
       </div>
     </article>`;
   }
@@ -870,11 +906,18 @@ export class AdminPage extends LitElement {
   };
 
   private async persistDraft(successMessage: string) {
-    const album = this.validatedDraft();
+    const isPublished = this.draft?.status === 'published';
+    const album = this.validatedDraft(isPublished);
     if (!album) return;
     await this.run(
-      async () => this.repository.saveAlbum(album),
-      successMessage,
+      async () => {
+        if (isPublished) {
+          await this.repository.publishAlbum(album, this.albums);
+        } else {
+          await this.repository.saveAlbum(album);
+        }
+      },
+      isPublished ? 'Cambios publicados.' : successMessage,
     );
   }
 
@@ -882,9 +925,10 @@ export class AdminPage extends LitElement {
     const album = this.validatedDraft(true);
     if (!album) return;
     await this.run(async () => {
-      await this.repository.publishAlbum(album, this.albums);
-      album.status = 'published';
-      album.publishedAt ??= Date.now();
+      const published = await this.repository.publishAlbum(album, this.albums);
+      album.status = published.status;
+      album.updatedAt = published.updatedAt;
+      album.publishedAt = published.publishedAt;
     }, 'Álbum publicado.');
   };
 
@@ -1010,8 +1054,15 @@ export class AdminPage extends LitElement {
 
   private async regeneratePhoto(photo: GalleryPhoto) {
     if (!this.draft) return;
-    await this.run(async () => {
-      this.message = `Regenerando crédito de ${photo.fileName}…`;
+    this.busy = true;
+    this.clearMessages();
+    this.photoFeedbackId = photo.id;
+    this.photoFeedbackMessage = `Regenerando crédito de ${photo.fileName}…`;
+    this.photoFeedbackError = '';
+    this.regeneratingPhotoId = photo.id;
+    this.uploadProgress = 0;
+    this.requestUpdate();
+    try {
       const original = await this.repository.getOriginalFile(photo);
       const result = await this.processor.process(
         original,
@@ -1033,8 +1084,23 @@ export class AdminPage extends LitElement {
       photo.publicPaths = uploaded.paths;
       await this.repository.saveAlbum(this.draft as Album);
       await this.repository.deletePaths(previousPaths);
+      this.photoFeedbackMessage =
+        this.draft.status === 'published'
+          ? 'Crédito regenerado. Guarda los cambios para actualizar el álbum publicado.'
+          : 'Crédito regenerado y listo para revisión.';
+    } catch (error) {
+      this.photoFeedbackMessage = '';
+      this.photoFeedbackError =
+        error instanceof Error
+          ? error.message
+          : 'No fue posible regenerar el crédito.';
+      this.setError(error);
+    } finally {
+      this.busy = false;
+      this.regeneratingPhotoId = '';
       this.uploadProgress = 0;
-    }, 'Crédito regenerado y listo para revisión.');
+      this.requestUpdate();
+    }
   }
 
   private async deletePhoto(photo: GalleryPhoto) {
