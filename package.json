@@ -11,6 +11,7 @@
   "packageManager": "pnpm@11.18.0",
   "scripts": {
     "start": "pnpm run build && web-dev-server --root-dir dist --app-index dist/index.html --port 8000",
+    "start:e2e": "FIREBASE_CONFIG_DISABLED=1 pnpm run build && web-dev-server --root-dir dist --app-index dist/index.html --port 8017",
     "build": "rimraf dist && rollup -c rollup.config.js",
     "typecheck": "tsc6 --noEmit",
     "lint": "eslint .",

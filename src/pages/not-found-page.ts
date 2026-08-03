@@ -6,11 +6,13 @@ export class NotFoundPage extends LitElement {
 
   render() {
     return html`
-      <section>
-        <span class="eyebrow">Error 404</span>
-        <h1>Página no encontrada</h1>
-        <p>La dirección no corresponde con una página de esta galería.</p>
-      </section>
+      <div class="page">
+        <section class="intro">
+          <span class="eyebrow">Error 404</span>
+          <h1>Página no encontrada</h1>
+          <p>La dirección no corresponde con una página de esta galería.</p>
+        </section>
+      </div>
     `;
   }
 }
