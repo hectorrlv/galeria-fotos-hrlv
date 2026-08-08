@@ -33,6 +33,21 @@ export class GalleryApp extends LitElement {
         min-height: 100vh;
       }
 
+      .skip-link {
+        position: fixed;
+        top: 0.5rem;
+        left: 0.5rem;
+        z-index: 200;
+        padding: 0.7rem 1rem;
+        color: #111;
+        background: #fff;
+        transform: translateY(-150%);
+      }
+
+      .skip-link:focus {
+        transform: translateY(0);
+      }
+
       header {
         position: sticky;
         top: 0;
@@ -77,6 +92,10 @@ export class GalleryApp extends LitElement {
         list-style: none;
       }
 
+      details {
+        display: none;
+      }
+
       nav a {
         color: var(--color-text-muted);
         font-size: 0.88rem;
@@ -109,13 +128,50 @@ export class GalleryApp extends LitElement {
         font-size: 0.7rem;
       }
 
+      footer {
+        width: min(100%, var(--content-width));
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-inline: auto;
+        padding: 2rem var(--space-page);
+        border-top: 1px solid var(--color-border);
+        color: var(--color-text-muted);
+        font-size: 0.8rem;
+      }
+
       @media (max-width: 42rem) {
         .header-inner {
-          min-height: 5.5rem;
-          align-items: flex-start;
+          min-height: 4.5rem;
+        }
+
+        .desktop-nav {
+          display: none;
+        }
+
+        details {
+          position: relative;
+          display: block;
+        }
+
+        summary {
+          cursor: pointer;
+        }
+
+        details nav {
+          position: absolute;
+          top: 2.2rem;
+          right: 0;
+          min-width: 12rem;
+          padding: 1rem;
+          border: 1px solid var(--color-border);
+          border-radius: 0.3rem;
+          background: var(--color-surface);
+        }
+
+        details nav ul {
+          align-items: flex-end;
           flex-direction: column;
-          justify-content: center;
-          gap: 0.65rem;
         }
       }
     `,
@@ -123,22 +179,39 @@ export class GalleryApp extends LitElement {
 
   render() {
     return html`
+      <a class="skip-link" href="#content">Saltar al contenido</a>
       <header>
         <div class="header-inner">
           <a class="brand" href="/">Galería HRLV</a>
-          <nav aria-label="Navegación principal">
+          <nav class="desktop-nav" aria-label="Navegación principal">
             <ul>
               ${publicNavigation.map(
                 item => html`<li><a href=${item.path}>${item.label}</a></li>`,
               )}
             </ul>
           </nav>
+          <details>
+            <summary>Menú</summary>
+            <nav aria-label="Navegación móvil">
+              <ul>
+                ${publicNavigation.map(
+                  item => html`<li><a href=${item.path}>${item.label}</a></li>`,
+                )}
+              </ul>
+            </nav>
+          </details>
         </div>
       </header>
-      <main id="content">${this.routes.outlet()}</main>
-      <p class="mode" role="status">
-        ${this.firebase ? 'Firebase configurado' : 'Modo de demostración'}
-      </p>
+      <main id="content" tabindex="-1">${this.routes.outlet()}</main>
+      <footer>
+        <span>Galería HRLV</span>
+        <span>Fotografías y relatos de viaje</span>
+      </footer>
+      ${
+        this.firebase
+          ? ''
+          : html`<p class="mode" role="status">Modo de demostración</p>`
+      }
     `;
   }
 }

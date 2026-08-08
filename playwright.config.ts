@@ -5,12 +5,12 @@ export default defineConfig({
   fullyParallel: true,
   reporter: 'list',
   use: {
-    baseURL: 'http://127.0.0.1:8000',
+    baseURL: 'http://127.0.0.1:8017',
     trace: 'on-first-retry',
   },
   webServer: {
-    command: 'FIREBASE_CONFIG_DISABLED=1 pnpm start',
-    url: 'http://127.0.0.1:8000',
+    command: 'pnpm run start:e2e',
+    url: 'http://127.0.0.1:8017',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

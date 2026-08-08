@@ -1,0 +1,20 @@
+[
+  {
+    "origin": [
+      "https://galeria-fotos-hrlv.web.app",
+      "https://galeria-fotos-hrlv.firebaseapp.com",
+      "http://localhost:8000",
+      "http://127.0.0.1:8000"
+    ],
+    "method": ["GET", "HEAD"],
+    "responseHeader": [
+      "Content-Type",
+      "Content-Length",
+      "ETag",
+      "X-Goog-Hash",
+      "X-Goog-Generation",
+      "X-Goog-Metageneration"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]
