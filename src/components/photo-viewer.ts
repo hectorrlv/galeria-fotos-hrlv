@@ -157,6 +157,7 @@ export class PhotoViewer extends LitElement {
 
   disconnectedCallback() {
     window.removeEventListener('keydown', this.handleKeydown);
+    document.documentElement.style.overflow = '';
     super.disconnectedCallback();
   }
 

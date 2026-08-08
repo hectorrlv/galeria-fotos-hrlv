@@ -46,3 +46,15 @@ test('orders photos explicitly and chooses the first visible cover', () => {
   );
   assert.equal(albumCover(album)?.id, 'cover');
 });
+
+test('falls back to the first visible photo when the selected cover is hidden', () => {
+  const album = createDraftAlbum();
+  album.photos = {
+    selected: photo('selected', false),
+    visible: photo('visible'),
+  };
+  album.photoOrder = ['selected', 'visible'];
+  album.coverPhotoId = 'selected';
+
+  assert.equal(albumCover(album)?.id, 'visible');
+});

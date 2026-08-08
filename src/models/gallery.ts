@@ -114,6 +114,9 @@ export const orderedPhotos = (album: Album): GalleryPhoto[] =>
     .filter((photo): photo is GalleryPhoto => photo !== undefined);
 
 export const albumCover = (album: Album): GalleryPhoto | undefined => {
-  if (album.coverPhotoId) return album.photos[album.coverPhotoId];
+  const selected = album.coverPhotoId
+    ? album.photos[album.coverPhotoId]
+    : undefined;
+  if (selected?.visible) return selected;
   return orderedPhotos(album).find(photo => photo.visible);
 };
