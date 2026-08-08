@@ -136,7 +136,25 @@ export class AlbumPage extends LitElement {
         padding: 1.25rem;
         border: 1px solid var(--color-border);
         border-radius: 0.3rem;
+        color: var(--color-accent);
+        font-weight: 700;
         text-decoration: none;
+      }
+
+      .album-navigation a:hover {
+        color: var(--color-text);
+        text-decoration: underline;
+        text-decoration-thickness: 0.12em;
+        text-underline-offset: 0.18em;
+      }
+
+      .album-navigation a:focus,
+      .album-navigation a:focus-visible {
+        outline: 3px solid var(--color-accent);
+        outline-offset: 0.2rem;
+        text-decoration: underline;
+        text-decoration-thickness: 0.12em;
+        text-underline-offset: 0.18em;
       }
 
       .album-navigation a:last-child {

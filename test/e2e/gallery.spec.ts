@@ -175,6 +175,114 @@ test('keeps photo viewer controls and a long caption inside the viewport', async
       page.viewportSize()?.height ?? 0,
     );
   }
+  await expect(viewer).toContainText(
+    'Un pie de foto deliberadamente largo para comprobar que el texto se ajusta y permanece visible dentro de una pantalla pequeña sin desplazar los controles de navegación. · Ciudad de México · 3 ago 2026',
+  );
+
+  await viewer.evaluate((element: HTMLElement & Record<string, unknown>) => {
+    element['photos'] = [
+      {
+        ...(element['photos'] as Array<Record<string, unknown>>)[0],
+        caption: '',
+        location: '',
+        takenAt: '',
+      },
+    ];
+  });
+  await expect(viewer).not.toContainText(' · ');
+});
+
+test('reorders all album photos from the compact mosaic', async ({ page }) => {
+  await page.goto('/');
+  const result = await page.evaluate(async () => {
+    const admin = document.createElement('admin-page') as HTMLElement &
+      Record<string, unknown> & { updateComplete?: Promise<unknown> };
+    document.body.append(admin);
+    await admin.updateComplete;
+
+    const photo = (id: string, visible = true) => ({
+      id,
+      albumId: 'album',
+      fileName: `${id}.jpg`,
+      width: 1200,
+      height: 800,
+      caption: '',
+      location: '',
+      takenAt: '',
+      altText: `Foto ${id}`,
+      visible,
+      publicPaths: [],
+      urls: {
+        thumbnail:
+          'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"/>',
+        grid: '',
+        viewer: '',
+      },
+      credit: {
+        position: 'auto',
+        color: 'auto',
+        opacity: 0.8,
+        scale: 1,
+        margin: 0.02,
+      },
+    });
+    const first = photo('first');
+    const hidden = photo('hidden', false);
+    const third = photo('third');
+    const album = {
+      id: 'album',
+      slug: 'album',
+      title: 'Álbum',
+      description: '',
+      country: '',
+      location: '',
+      startDate: '',
+      endDate: '',
+      category: '',
+      coverPhotoId: 'first',
+      photoOrder: ['first', 'hidden', 'third'],
+      photos: { first, hidden, third },
+      status: 'draft',
+      featured: false,
+      createdAt: 1,
+      updatedAt: 1,
+      publishedAt: null,
+    };
+    admin['draft'] = album;
+    admin['render'] = () =>
+      (admin['renderAlbumEditor'] as (value: typeof album) => unknown).call(
+        admin,
+        album,
+      );
+    (admin['requestUpdate'] as () => void).call(admin);
+    await admin.updateComplete;
+
+    admin['draggedPhotoId'] = 'third';
+    (admin['dropPhoto'] as (targetId: string) => void).call(admin, 'first');
+    await admin.updateComplete;
+
+    const root = admin.shadowRoot as ShadowRoot;
+    const order = [...root.querySelectorAll<HTMLElement>('.order-photo')].map(
+      element => element.getAttribute('aria-label'),
+    );
+    const cards = [...root.querySelectorAll('.photo-card .hint')].map(
+      element => element.textContent,
+    );
+    admin.remove();
+    return { photoOrder: album.photoOrder, order, cards };
+  });
+
+  expect(result.photoOrder).toEqual(['third', 'first', 'hidden']);
+  expect(result.order).toEqual([
+    'Mover fotografía 1: third.jpg',
+    'Mover fotografía 2: first.jpg',
+    'Mover fotografía 3: hidden.jpg',
+  ]);
+  expect(result.cards).toEqual([
+    '1. third.jpg',
+    '2. first.jpg',
+    '3. hidden.jpg',
+  ]);
 });
 
 test('keeps album and photo date inputs inside the mobile editor', async ({

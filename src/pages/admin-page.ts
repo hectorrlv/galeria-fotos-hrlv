@@ -239,10 +239,6 @@ export class AdminPage extends LitElement {
         background: var(--color-background);
       }
 
-      .photo-card[draggable='true'] {
-        cursor: grab;
-      }
-
       .photo-card img {
         width: 100%;
         aspect-ratio: 4 / 3;
@@ -275,23 +271,63 @@ export class AdminPage extends LitElement {
         color: #ffd8d3;
       }
 
-      .preview {
+      .order-editor {
         padding: 1rem;
         border: 1px dashed var(--color-border);
         border-radius: 0.35rem;
       }
 
-      .preview-grid {
+      .order-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
         gap: 0.4rem;
         margin-top: 1rem;
       }
 
-      .preview-grid img {
+      .order-photo {
+        position: relative;
+        overflow: hidden;
+        padding: 0;
+        border: 1px solid transparent;
+        border-radius: 0.2rem;
+        background: var(--color-surface);
+        cursor: grab;
+      }
+
+      .order-photo:focus-visible {
+        border-color: var(--color-accent);
+        outline: 2px solid var(--color-accent);
+        outline-offset: 0.15rem;
+      }
+
+      .order-photo.is-hidden {
+        opacity: 0.55;
+      }
+
+      .order-photo img {
         width: 100%;
         aspect-ratio: 1;
+        display: block;
         object-fit: cover;
+      }
+
+      .order-number,
+      .order-visibility {
+        position: absolute;
+        padding: 0.2rem 0.4rem;
+        color: #fff;
+        background: rgba(5, 5, 5, 0.78);
+        font-size: 0.78rem;
+      }
+
+      .order-number {
+        top: 0.35rem;
+        left: 0.35rem;
+      }
+
+      .order-visibility {
+        right: 0.35rem;
+        bottom: 0.35rem;
       }
 
       @media (max-width: 54rem) {
@@ -541,8 +577,8 @@ export class AdminPage extends LitElement {
           <div>
             <h2>Fotografías</h2>
             <p class="hint">
-              Arrastra las tarjetas para cambiar el orden. El original permanece
-              privado y sin modificaciones.
+              Edita los datos de cada fotografía. El original permanece privado
+              y sin modificaciones.
             </p>
           </div>
           <label class="button">
@@ -570,36 +606,26 @@ export class AdminPage extends LitElement {
 
       ${
         photos.length
-          ? html`<details class="preview">
-              <summary>Revisar mosaico antes de publicar</summary>
-              <div class="preview-grid">
-                ${photos
-                  .filter(photo => photo.visible)
-                  .map(
-                    photo =>
-                      html`<img
-                        src=${photo.urls.thumbnail}
-                        alt=${photo.altText}
-                        loading="lazy"
-                      />`,
-                  )}
+          ? html`<section
+              class="order-editor"
+              aria-labelledby="photo-order-title"
+            >
+              <h2 id="photo-order-title">Ordenar fotos</h2>
+              <p class="hint">
+                Arrastra una miniatura sobre otra para cambiar el orden. Guarda
+                el álbum para conservarlo.
+              </p>
+              <div class="order-grid">
+                ${photos.map((photo, index) => this.renderPhotoOrderItem(photo, index))}
               </div>
-            </details>`
+            </section>`
           : ''
       }
     </form>`;
   }
 
   private renderPhotoEditor(photo: GalleryPhoto, index: number) {
-    return html`<article
-      class="photo-card"
-      draggable="true"
-      @dragstart=${() => {
-        this.draggedPhotoId = photo.id;
-      }}
-      @dragover=${(event: DragEvent) => event.preventDefault()}
-      @drop=${() => this.dropPhoto(photo.id)}
-    >
+    return html`<article class="photo-card">
       <div>
         <img src=${photo.urls.thumbnail} alt=${photo.altText} />
         <p class="hint">${index + 1}. ${photo.fileName}</p>
@@ -703,6 +729,23 @@ export class AdminPage extends LitElement {
         }
       </div>
     </article>`;
+  }
+
+  private renderPhotoOrderItem(photo: GalleryPhoto, index: number) {
+    return html`<button
+      type="button"
+      class="order-photo ${photo.visible ? '' : 'is-hidden'}"
+      draggable="true"
+      @dragstart=${(event: DragEvent) => this.startPhotoDrag(event, photo.id)}
+      @dragend=${this.endPhotoDrag}
+      @dragover=${(event: DragEvent) => event.preventDefault()}
+      @drop=${() => this.dropPhoto(photo.id)}
+      aria-label=${`Mover fotografía ${index + 1}: ${photo.fileName}`}
+    >
+      <img src=${photo.urls.thumbnail} alt=${photo.altText} loading="lazy" />
+      <span class="order-number">${index + 1}</span>
+      ${photo.visible ? '' : html`<span class="order-visibility">Oculta</span>`}
+    </button>`;
   }
 
   private renderSettings() {
@@ -1121,6 +1164,16 @@ export class AdminPage extends LitElement {
       await this.repository.saveAlbum(this.draft);
     }, 'Fotografía eliminada.');
   }
+
+  private startPhotoDrag(event: DragEvent, photoId: string) {
+    this.draggedPhotoId = photoId;
+    event.dataTransfer?.setData('text/plain', photoId);
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+  }
+
+  private readonly endPhotoDrag = () => {
+    this.draggedPhotoId = '';
+  };
 
   private dropPhoto(targetId: string) {
     if (!this.draft || !this.draggedPhotoId || this.draggedPhotoId === targetId)

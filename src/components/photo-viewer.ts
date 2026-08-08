@@ -207,7 +207,7 @@ export class PhotoViewer extends LitElement {
           ›
         </button>
         <div class="caption" aria-live="polite">
-          <p>${photo.caption || photo.location}</p>
+          <p>${this.photoDetails(photo)}</p>
           <p>${this.index + 1} / ${this.photos.length}</p>
         </div>
       </div>
@@ -233,6 +233,18 @@ export class PhotoViewer extends LitElement {
     this.index =
       (this.index + direction + this.photos.length) % this.photos.length;
     this.requestUpdate();
+  }
+
+  private photoDetails(photo: GalleryPhoto): string {
+    const takenAt = photo.takenAt
+      ? new Intl.DateTimeFormat('es-MX', {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+          timeZone: 'UTC',
+        }).format(new Date(`${photo.takenAt}T00:00:00Z`))
+      : '';
+    return [photo.caption, photo.location, takenAt].filter(Boolean).join(' · ');
   }
 
   private readonly close = () => {
