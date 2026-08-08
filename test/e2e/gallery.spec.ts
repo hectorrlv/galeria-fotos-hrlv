@@ -192,6 +192,54 @@ test('keeps photo viewer controls and a long caption inside the viewport', async
   await expect(viewer).not.toContainText(' · ');
 });
 
+test('releases the page scroll lock when an open viewer is disconnected', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const overflow = await page.evaluate(async () => {
+    const viewer = document.createElement('photo-viewer') as HTMLElement &
+      Record<string, unknown> & { updateComplete?: Promise<unknown> };
+    document.body.append(viewer);
+    await viewer.updateComplete;
+    viewer['photos'] = [
+      {
+        id: 'photo',
+        albumId: 'album',
+        fileName: 'photo.jpg',
+        width: 4,
+        height: 3,
+        caption: '',
+        location: '',
+        takenAt: '',
+        altText: 'Fotografía de prueba',
+        visible: true,
+        publicPaths: [],
+        urls: {
+          thumbnail: '',
+          grid: '',
+          viewer:
+            'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="4" height="3"/>',
+        },
+        credit: {
+          position: 'auto',
+          color: 'auto',
+          opacity: 0.8,
+          scale: 1,
+          margin: 0.02,
+        },
+      },
+    ];
+    viewer['open'] = true;
+    await viewer.updateComplete;
+    const locked = document.documentElement.style.overflow;
+    viewer.remove();
+    return { locked, afterDisconnect: document.documentElement.style.overflow };
+  });
+
+  expect(overflow.locked).toBe('hidden');
+  expect(overflow.afterDisconnect).toBe('');
+});
+
 test('reorders all album photos from the compact mosaic', async ({ page }) => {
   await page.goto('/');
   const result = await page.evaluate(async () => {
@@ -324,7 +372,7 @@ test('keeps album and photo date inputs inside the mobile editor', async ({
   }
 });
 
-test('stages regenerated credit privately and publishes it when changes are saved', async ({
+test('publishes regenerated credit before deleting its old variants', async ({
   page,
 }) => {
   await page.goto('/');
@@ -408,7 +456,9 @@ test('stages regenerated credit privately and publishes it when changes are save
       publishAlbum: async () => {
         calls.push('public');
       },
-      deletePaths: async () => undefined,
+      deletePaths: async () => {
+        calls.push('delete-old-variants');
+      },
     };
     admin['processor'] = {
       process: async () => ({
@@ -434,9 +484,7 @@ test('stages regenerated credit privately and publishes it when changes are save
   ).toBeVisible();
   await admin.getByRole('button', { name: 'Regenerar crédito' }).click();
   await expect(
-    admin.getByText(
-      'Crédito regenerado. Guarda los cambios para actualizar el álbum publicado.',
-    ),
+    admin.getByText('Crédito regenerado y publicado.'),
   ).toBeVisible();
   await expect
     .poll(() =>
@@ -445,15 +493,82 @@ test('stages regenerated credit privately and publishes it when changes are save
           (element as HTMLElement & Record<string, unknown>)['testCalls'],
       ),
     )
-    .toEqual(['private']);
+    .toEqual(['public', 'delete-old-variants']);
+});
 
-  await admin.getByRole('button', { name: 'Guardar cambios' }).click();
-  await expect
-    .poll(() =>
-      admin.evaluate(
-        element =>
-          (element as HTMLElement & Record<string, unknown>)['testCalls'],
-      ),
-    )
-    .toEqual(['private', 'public']);
+test('publishes an album update before deleting a published photo file', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const calls = await page.evaluate(async () => {
+    const admin = document.createElement('admin-page') as HTMLElement &
+      Record<string, unknown> & { updateComplete?: Promise<unknown> };
+    document.body.append(admin);
+    await admin.updateComplete;
+
+    const photo = {
+      id: 'photo',
+      albumId: 'published-album',
+      fileName: 'photo.jpg',
+      width: 1200,
+      height: 800,
+      caption: '',
+      location: '',
+      takenAt: '',
+      altText: 'Fotografía publicada',
+      visible: true,
+      publicPaths: ['public/published-album/photo/viewer.webp'],
+      urls: { thumbnail: '', grid: '', viewer: '' },
+      credit: {
+        position: 'auto',
+        color: 'auto',
+        opacity: 0.8,
+        scale: 1,
+        margin: 0.02,
+      },
+    };
+    const album = {
+      id: 'published-album',
+      slug: 'album-publicado',
+      title: 'Álbum publicado',
+      description: '',
+      country: '',
+      location: '',
+      startDate: '',
+      endDate: '',
+      category: '',
+      coverPhotoId: 'photo',
+      photoOrder: ['photo'],
+      photos: { photo },
+      status: 'published',
+      featured: false,
+      createdAt: 1,
+      updatedAt: 1,
+      publishedAt: 1,
+    };
+    const events: string[] = [];
+    admin['draft'] = album;
+    admin['albums'] = [album];
+    admin['repository'] = {
+      publishAlbum: async (updated: typeof album) => {
+        events.push(`public:${Object.keys(updated.photos).join(',')}`);
+      },
+      deletePhotoFiles: async () => {
+        events.push('delete-files');
+      },
+    };
+    const originalConfirm = window.confirm;
+    window.confirm = () => true;
+    try {
+      await (admin['deletePhoto'] as (value: typeof photo) => Promise<void>)(
+        photo,
+      );
+    } finally {
+      window.confirm = originalConfirm;
+      admin.remove();
+    }
+    return events;
+  });
+
+  expect(calls).toEqual(['public:', 'delete-files']);
 });

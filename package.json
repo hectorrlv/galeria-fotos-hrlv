@@ -23,7 +23,7 @@
   },
   "dependencies": {
     "@lit-labs/router": "^0.1.4",
-    "firebase": "^12.16.0",
+    "firebase": "^12.17.1",
     "lit": "^3.3.3"
   },
   "devDependencies": {
@@ -31,7 +31,7 @@
     "@playwright/test": "^1.62.0",
     "@rollup/plugin-node-resolve": "^16.0.3",
     "@rollup/plugin-replace": "^6.0.2",
-    "@types/node": "^24.10.1",
+    "@types/node": "^26.1.2",
     "@web/dev-server": "^1.0.0",
     "@web/rollup-plugin-html": "^4.0.0",
     "dotenv": "^17.2.3",
