@@ -1125,11 +1125,15 @@ export class AdminPage extends LitElement {
       photo.credit = result.credit;
       photo.urls = uploaded.urls;
       photo.publicPaths = uploaded.paths;
-      await this.repository.saveAlbum(this.draft as Album);
+      if (this.draft.status === 'published') {
+        await this.repository.publishAlbum(this.draft, this.albums);
+      } else {
+        await this.repository.saveAlbum(this.draft);
+      }
       await this.repository.deletePaths(previousPaths);
       this.photoFeedbackMessage =
         this.draft.status === 'published'
-          ? 'Crédito regenerado. Guarda los cambios para actualizar el álbum publicado.'
+          ? 'Crédito regenerado y publicado.'
           : 'Crédito regenerado y listo para revisión.';
     } catch (error) {
       this.photoFeedbackMessage = '';
@@ -1153,7 +1157,6 @@ export class AdminPage extends LitElement {
     );
     if (!confirmed) return;
     await this.run(async () => {
-      await this.repository.deletePhotoFiles(photo);
       if (!this.draft) return;
       delete this.draft.photos[photo.id];
       this.draft.photoOrder = this.draft.photoOrder.filter(
@@ -1161,7 +1164,12 @@ export class AdminPage extends LitElement {
       );
       if (this.draft.coverPhotoId === photo.id)
         this.draft.coverPhotoId = this.draft.photoOrder[0] ?? null;
-      await this.repository.saveAlbum(this.draft);
+      if (this.draft.status === 'published') {
+        await this.repository.publishAlbum(this.draft, this.albums);
+      } else {
+        await this.repository.saveAlbum(this.draft);
+      }
+      await this.repository.deletePhotoFiles(photo);
     }, 'Fotografía eliminada.');
   }
 
