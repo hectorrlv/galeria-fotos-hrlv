@@ -97,7 +97,7 @@ test('shows the public empty state before the first album is published', async (
   await expect(page.getByLabel('Tipo de paseo')).toBeVisible();
 });
 
-test('keeps photo viewer controls and a long caption inside the viewport', async ({
+test('keeps the photo viewer close control and long caption inside the viewport', async ({
   page,
 }) => {
   await page.goto('/');
@@ -144,12 +144,7 @@ test('keeps photo viewer controls and a long caption inside the viewport', async
     const viewport = element.shadowRoot?.querySelector('.viewer');
     const image = element.shadowRoot?.querySelector('img');
     const caption = element.shadowRoot?.querySelector('.caption');
-    const targets = [
-      element.shadowRoot?.querySelector('.close'),
-      element.shadowRoot?.querySelector('.previous'),
-      element.shadowRoot?.querySelector('.next'),
-      caption,
-    ];
+    const targets = [element.shadowRoot?.querySelector('.close'), caption];
     return {
       viewport: viewport?.getBoundingClientRect().toJSON(),
       image: image?.getBoundingClientRect().toJSON(),
@@ -190,6 +185,129 @@ test('keeps photo viewer controls and a long caption inside the viewport', async
     ];
   });
   await expect(viewer).not.toContainText(' · ');
+  await expect(
+    viewer.getByRole('button', { name: 'Fotografía anterior' }),
+  ).toHaveCount(0);
+  await expect(
+    viewer.getByRole('button', { name: 'Fotografía siguiente' }),
+  ).toHaveCount(0);
+});
+
+test('navigates and zooms photos without visible navigation buttons', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    document.body.append(document.createElement('photo-viewer'));
+  });
+  const viewer = page.locator('photo-viewer');
+  await viewer.evaluate((element: HTMLElement & Record<string, unknown>) => {
+    const photo = {
+      id: 'photo',
+      albumId: 'album',
+      fileName: 'photo.jpg',
+      width: 1600,
+      height: 1200,
+      caption: '',
+      location: '',
+      takenAt: '',
+      altText: 'Fotografía de prueba',
+      visible: true,
+      publicPaths: [],
+      urls: {
+        thumbnail: '',
+        grid: '',
+        viewer:
+          'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1200"><rect width="100%25" height="100%25" fill="gray"/></svg>',
+      },
+      credit: {
+        position: 'auto',
+        color: 'auto',
+        opacity: 0.8,
+        scale: 1,
+        margin: 0.02,
+      },
+    };
+    element['photos'] = [photo, { ...photo, id: 'photo-2' }];
+    element['open'] = true;
+  });
+
+  await page.keyboard.press('ArrowRight');
+  await expect(viewer).toContainText('2 / 2');
+  await page.keyboard.press('ArrowLeft');
+  await expect(viewer).toContainText('1 / 2');
+
+  const image = viewer.locator('img');
+  await image.dblclick();
+  await expect(image).toHaveAttribute('style', /scale\(2\)/);
+  await page.keyboard.press('0');
+  await expect(image).toHaveAttribute('style', /scale\(1\)/);
+
+  await viewer.evaluate(
+    async (element: HTMLElement & Record<string, unknown>) => {
+      const figure = element.shadowRoot?.querySelector('figure') as HTMLElement;
+      figure.setPointerCapture = () => undefined;
+      const pointerEvent = (pointerId: number, x: number, y: number) =>
+        ({
+          pointerId,
+          clientX: x,
+          clientY: y,
+          currentTarget: figure,
+        }) as unknown as PointerEvent;
+      (element['handlePointerDown'] as (event: PointerEvent) => void)(
+        pointerEvent(1, 200, 200),
+      );
+      (element['handlePointerUp'] as (event: PointerEvent) => void)(
+        pointerEvent(1, 120, 200),
+      );
+      await (element['updateComplete'] as Promise<unknown>);
+    },
+  );
+  await expect(viewer).toContainText('2 / 2');
+
+  await image.dblclick();
+  await expect(image).toHaveAttribute('style', /scale\(2\)/);
+  await page.keyboard.press('ArrowRight');
+  await expect(viewer).toContainText('1 / 2');
+  await expect(image).toHaveAttribute('style', /scale\(1\)/);
+
+  await viewer.evaluate(
+    async (element: HTMLElement & Record<string, unknown>) => {
+      const figure = element.shadowRoot?.querySelector('figure') as HTMLElement;
+      figure.setPointerCapture = () => undefined;
+      const pointerEvent = (pointerId: number, x: number, y: number) =>
+        ({
+          pointerId,
+          clientX: x,
+          clientY: y,
+          currentTarget: figure,
+          preventDefault: () => undefined,
+        }) as unknown as PointerEvent;
+      const down = element['handlePointerDown'] as (
+        event: PointerEvent,
+      ) => void;
+      const move = element['handlePointerMove'] as (
+        event: PointerEvent,
+      ) => void;
+      const up = element['handlePointerUp'] as (event: PointerEvent) => void;
+      down(pointerEvent(1, 100, 100));
+      down(pointerEvent(2, 200, 100));
+      move(pointerEvent(2, 300, 100));
+      up(pointerEvent(2, 300, 100));
+      move(pointerEvent(1, 150, 100));
+      up(pointerEvent(1, 150, 100));
+      await (element['updateComplete'] as Promise<unknown>);
+    },
+  );
+  await expect(image).toHaveAttribute(
+    'style',
+    /translate\(50px, 0px\) scale\(2\)/,
+  );
+
+  await page.keyboard.press('0');
+  await image.hover();
+  await page.mouse.wheel(0, -100);
+  await expect(image).toHaveAttribute('style', /scale\(1\.15\)/);
 });
 
 test('releases the page scroll lock when an open viewer is disconnected', async ({
