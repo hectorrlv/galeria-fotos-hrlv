@@ -260,6 +260,7 @@ test('navigates and zooms photos without visible navigation buttons', async ({
   await expect(viewer).toContainText('1 / 2');
 
   const image = viewer.locator('img');
+  await expect(image).toHaveAttribute('draggable', 'false');
   await image.dblclick();
   await expect(image).toHaveAttribute('style', /scale\(2\)/);
   await page.keyboard.press('0');

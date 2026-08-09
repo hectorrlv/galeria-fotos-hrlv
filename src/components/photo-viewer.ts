@@ -205,6 +205,7 @@ export class PhotoViewer extends LitElement {
           <img
             src=${photo.urls.viewer}
             alt=${photo.altText}
+            draggable="false"
             style=${`transform: translate(${this.panX}px, ${this.panY}px) scale(${this.zoom})`}
           />
         </figure>
