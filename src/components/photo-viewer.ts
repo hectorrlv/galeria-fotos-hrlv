@@ -198,7 +198,7 @@ export class PhotoViewer extends LitElement {
           @pointerdown=${this.handlePointerDown}
           @pointermove=${this.handlePointerMove}
           @pointerup=${this.handlePointerUp}
-          @pointercancel=${this.handlePointerUp}
+          @pointercancel=${this.handlePointerCancel}
           @dblclick=${this.handleDoubleClick}
           @wheel=${this.handleWheel}
         >
@@ -321,6 +321,15 @@ export class PhotoViewer extends LitElement {
     }
   };
 
+  private readonly handlePointerCancel = (event: PointerEvent) => {
+    this.pointers.delete(event.pointerId);
+    this.pointers.clear();
+    this.swipeStart = null;
+    this.dragStart = null;
+    this.pinchStart = null;
+    this.lastTapAt = 0;
+  };
+
   private readonly handleWheel = (event: WheelEvent) => {
     event.preventDefault();
     this.setZoom(this.zoom * (event.deltaY < 0 ? 1.15 : 0.85));
@@ -356,8 +365,13 @@ export class PhotoViewer extends LitElement {
 
   private setPan(x: number, y: number, requestUpdate = true) {
     const figure = this.renderRoot.querySelector<HTMLElement>('figure');
-    const maxX = figure ? (figure.clientWidth * (this.zoom - 1)) / 2 : 0;
-    const maxY = figure ? (figure.clientHeight * (this.zoom - 1)) / 2 : 0;
+    const size = this.containedPhotoSize(figure);
+    const maxX = figure
+      ? Math.max(0, (size.width * this.zoom - figure.clientWidth) / 2)
+      : 0;
+    const maxY = figure
+      ? Math.max(0, (size.height * this.zoom - figure.clientHeight) / 2)
+      : 0;
     this.panX = Math.min(maxX, Math.max(-maxX, x));
     this.panY = Math.min(maxY, Math.max(-maxY, y));
     if (requestUpdate) this.requestUpdate();
@@ -380,6 +394,21 @@ export class PhotoViewer extends LitElement {
     const [first, second] = [...this.pointers.values()];
     if (!first || !second) return 1;
     return Math.hypot(first.x - second.x, first.y - second.y);
+  }
+
+  private containedPhotoSize(figure: HTMLElement | null) {
+    const photo = this.photos[this.index];
+    if (!figure || !photo?.width || !photo.height) {
+      return {
+        width: figure?.clientWidth ?? 0,
+        height: figure?.clientHeight ?? 0,
+      };
+    }
+    const scale = Math.min(
+      figure.clientWidth / photo.width,
+      figure.clientHeight / photo.height,
+    );
+    return { width: photo.width * scale, height: photo.height * scale };
   }
 
   private photoDetails(photo: GalleryPhoto): string {

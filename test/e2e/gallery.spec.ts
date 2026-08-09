@@ -237,6 +237,28 @@ test('navigates and zooms photos without visible navigation buttons', async ({
   await page.keyboard.press('ArrowLeft');
   await expect(viewer).toContainText('1 / 2');
 
+  await viewer.evaluate(
+    async (element: HTMLElement & Record<string, unknown>) => {
+      const figure = element.shadowRoot?.querySelector('figure') as HTMLElement;
+      figure.setPointerCapture = () => undefined;
+      const pointerEvent = (x: number) =>
+        ({
+          pointerId: 1,
+          clientX: x,
+          clientY: 200,
+          currentTarget: figure,
+        }) as unknown as PointerEvent;
+      (element['handlePointerDown'] as (event: PointerEvent) => void)(
+        pointerEvent(200),
+      );
+      (element['handlePointerCancel'] as (event: PointerEvent) => void)(
+        pointerEvent(120),
+      );
+      await (element['updateComplete'] as Promise<unknown>);
+    },
+  );
+  await expect(viewer).toContainText('1 / 2');
+
   const image = viewer.locator('img');
   await image.dblclick();
   await expect(image).toHaveAttribute('style', /scale\(2\)/);
