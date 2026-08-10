@@ -8,6 +8,7 @@ import {
 
 test('normalizes EXIF dates without carrying a time zone into the saved date', () => {
   assert.equal(normalizeExifDate('2026:08:09 14:32:01'), '2026-08-09');
+  assert.equal(normalizeExifDate(new Date(2026, 7, 9, 23, 30)), '2026-08-09');
   assert.equal(normalizeExifDate('invalid'), undefined);
   assert.equal(normalizeExifDate('2026:02:31 14:32:01'), undefined);
 });
@@ -57,4 +58,29 @@ test('keeps metadata empty when EXIF or reverse geocoding is unavailable', async
     throw new Error('No EXIF');
   });
   assert.deepEqual(await reader.read({} as File), {});
+});
+
+test('retries a location after a failed reverse-geocoding request', async () => {
+  let attempts = 0;
+  const reader = new PhotoMetadataReader(
+    async () => ({ latitude: 19.4326, longitude: -99.1332 }),
+    async () => {
+      attempts += 1;
+      return attempts === 1
+        ? new Response('', { status: 503 })
+        : new Response(
+            JSON.stringify({
+              address: { city: 'Ciudad de México', country: 'México' },
+            }),
+            { status: 200 },
+          );
+    },
+    () => 1_000,
+  );
+
+  assert.deepEqual(await reader.read({} as File), {});
+  assert.deepEqual(await reader.read({} as File), {
+    location: 'Ciudad de México, México',
+  });
+  assert.equal(attempts, 2);
 });

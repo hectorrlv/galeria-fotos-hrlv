@@ -20,7 +20,7 @@ const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/reverse';
 const NOMINATIM_INTERVAL_MS = 1_000;
 
 const sleep: Sleep = milliseconds =>
-  new Promise(resolve => window.setTimeout(resolve, milliseconds));
+  new Promise(resolve => globalThis.setTimeout(resolve, milliseconds));
 
 const parseExif: ExifParser = file =>
   exifr.parse(file, {
@@ -36,7 +36,10 @@ const parseExif: ExifParser = file =>
 
 export const normalizeExifDate = (value: unknown): string | undefined => {
   if (value instanceof Date && !Number.isNaN(value.valueOf())) {
-    return value.toISOString().slice(0, 10);
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
   if (typeof value !== 'string') return undefined;
   const match = /^(\d{4})[:-](\d{2})[:-](\d{2})/.exec(value.trim());
@@ -105,15 +108,15 @@ export class PhotoMetadataReader {
     try {
       const tags = await this.readExif(file);
       if (!tags) return {};
-      const metadata: PhotoMetadata = {
-        takenAt: normalizeExifDate(
-          tags.DateTimeOriginal ?? tags.CreateDate ?? tags.ModifyDate,
-        ),
-      };
+      const takenAt = normalizeExifDate(
+        tags.DateTimeOriginal ?? tags.CreateDate ?? tags.ModifyDate,
+      );
+      const metadata: PhotoMetadata = takenAt ? { takenAt } : {};
       const latitude = Number(tags.latitude);
       const longitude = Number(tags.longitude);
       if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-        metadata.location = await this.resolveLocation(latitude, longitude);
+        const location = await this.resolveLocation(latitude, longitude);
+        if (location) metadata.location = location;
       }
       return metadata;
     } catch {
@@ -131,7 +134,11 @@ export class PhotoMetadataReader {
       result = this.reverseGeocode(latitude, longitude);
       this.locationCache.set(key, result);
     }
-    return result;
+    const location = await result;
+    if (!location && this.locationCache.get(key) === result) {
+      this.locationCache.delete(key);
+    }
+    return location;
   }
 
   private async reverseGeocode(
