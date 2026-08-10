@@ -5,6 +5,7 @@ import { isAdminUid } from '../firebase/admin-access.js';
 import { firebaseAvailable } from '../firebase/client.js';
 import { GalleryRepository } from '../firebase/gallery-repository.js';
 import { BrowserImageProcessor } from '../image-processing/browser-image-processor.js';
+import { PhotoMetadataReader } from '../image-processing/photo-metadata.js';
 import {
   DEFAULT_SITE_CONFIG,
   createDraftAlbum,
@@ -23,6 +24,7 @@ export class AdminPage extends LitElement {
   private readonly auth = new AuthService();
   private readonly repository = new GalleryRepository();
   private readonly processor = new BrowserImageProcessor();
+  private readonly metadataReader = new PhotoMetadataReader();
   private user: User | null = null;
   private authReady = false;
   private albums: Album[] = [];
@@ -269,6 +271,12 @@ export class AdminPage extends LitElement {
 
       .photo-feedback.error {
         color: #ffd8d3;
+      }
+
+      .metadata-attribution {
+        margin: 0;
+        color: var(--color-text-muted);
+        font-size: 0.75rem;
       }
 
       .order-editor {
@@ -579,6 +587,9 @@ export class AdminPage extends LitElement {
             <p class="hint">
               Edita los datos de cada fotografía. El original permanece privado
               y sin modificaciones.
+            </p>
+            <p class="metadata-attribution">
+              Las ubicaciones se resuelven con datos de OpenStreetMap.
             </p>
           </div>
           <label class="button">
@@ -1034,8 +1045,11 @@ export class AdminPage extends LitElement {
         const file = files[index];
         if (!file) continue;
         const photoId = crypto.randomUUID();
-        this.message = `Procesando ${index + 1} de ${files.length}: ${file.name}`;
+        this.message = `Leyendo metadatos ${index + 1} de ${files.length}: ${file.name}`;
         this.uploadProgress = index / files.length;
+        this.requestUpdate();
+        const metadata = await this.metadataReader.read(file);
+        this.message = `Procesando ${index + 1} de ${files.length}: ${file.name}`;
         this.requestUpdate();
         const result = await this.processor.process(
           file,
@@ -1071,8 +1085,8 @@ export class AdminPage extends LitElement {
           width: result.originalWidth,
           height: result.originalHeight,
           caption: '',
-          location: this.draft.location,
-          takenAt: this.draft.startDate,
+          location: metadata.location ?? this.draft.location,
+          takenAt: metadata.takenAt ?? this.draft.startDate,
           altText: fallbackAlt,
           visible: true,
           originalPath,
