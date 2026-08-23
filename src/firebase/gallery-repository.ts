@@ -22,6 +22,7 @@ import {
 } from '../models/gallery.js';
 import { getFirebaseServices } from './client.js';
 import { publicationChanges } from './publication.js';
+import { versionedOriginalPath } from './storage-paths.js';
 
 type ErrorCallback = (error: Error) => void;
 
@@ -131,13 +132,7 @@ export class GalleryRepository {
     file: File,
     onProgress: (progress: number) => void,
   ): Promise<string> {
-    const extension =
-      file.name
-        .split('.')
-        .pop()
-        ?.toLowerCase()
-        .replace(/[^a-z0-9]/g, '') || 'image';
-    const path = `originals/${albumId}/${photoId}/original.${extension}`;
+    const path = versionedOriginalPath(albumId, photoId, file.name);
     await this.upload(path, file, file.type, onProgress);
     return path;
   }

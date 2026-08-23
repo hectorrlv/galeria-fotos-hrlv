@@ -713,24 +713,24 @@ export class AdminPage extends LitElement {
             <strong>${photoFileKey(group[0]?.fileName ?? '')}</strong>
             <div class="duplicate-photos">
               ${group.map(
-              photo =>
-                html`<article class="duplicate-photo">
-                  <img src=${photo.urls.thumbnail} alt=${photo.altText} />
-                  <strong>${photo.fileName}</strong>
-                  <p>
-                    ${photo.width} × ${photo.height} ·
-                    ${photo.visible ? 'Visible' : 'Oculta'}
-                  </p>
-                  <button
-                    type="button"
-                    class="primary"
-                    ?disabled=${this.busy}
-                    @click=${() => this.retainDuplicate(photo, group)}
-                  >
-                    Conservar esta
-                  </button>
-                </article>`,
-            )}
+                photo =>
+                  html`<article class="duplicate-photo">
+                    <img src=${photo.urls.thumbnail} alt=${photo.altText} />
+                    <strong>${photo.fileName}</strong>
+                    <p>
+                      ${photo.width} × ${photo.height} ·
+                      ${photo.visible ? 'Visible' : 'Oculta'}
+                    </p>
+                    <button
+                      type="button"
+                      class="primary"
+                      ?disabled=${this.busy}
+                      @click=${() => this.retainDuplicate(photo, group)}
+                    >
+                      Conservar esta
+                    </button>
+                  </article>`,
+              )}
             </div>
           </section>`,
       )}
@@ -1149,6 +1149,7 @@ export class AdminPage extends LitElement {
     const files = [...(input.files ?? [])];
     input.value = '';
     if (!this.draft || files.length === 0) return;
+    if (this.draft.status === 'published' && !this.validatedDraft(true)) return;
     this.busy = true;
     this.error = '';
     try {
@@ -1178,7 +1179,7 @@ export class AdminPage extends LitElement {
         const result = await this.processor.process(
           file,
           this.site.creditText,
-          structuredClone(this.site.defaultCredit),
+          structuredClone(existing?.credit ?? this.site.defaultCredit),
         );
         const originalPath = await this.repository.uploadOriginal(
           this.draft.id,

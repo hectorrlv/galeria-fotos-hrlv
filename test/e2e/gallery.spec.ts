@@ -524,11 +524,11 @@ test('replaces a photo with the same base name without changing its metadata or 
     await admin.updateComplete;
 
     const credit = {
-      position: 'auto',
-      color: 'auto',
-      opacity: 0.8,
-      scale: 1,
-      margin: 0.02,
+      position: 'top-left',
+      color: 'dark',
+      opacity: 0.65,
+      scale: 1.3,
+      margin: 0.04,
     };
     const photo = {
       id: 'photo',
@@ -566,6 +566,7 @@ test('replaces a photo with the same base name without changing its metadata or 
       publishedAt: 150,
     };
     const calls: string[] = [];
+    let processedCredit: unknown;
     admin['draft'] = album;
     admin['albums'] = [album];
     admin['site'] = {
@@ -575,16 +576,29 @@ test('replaces a photo with the same base name without changing its metadata or 
       about: '',
       instagramUrl: '',
       xUrl: '',
-      defaultCredit: credit,
+      defaultCredit: {
+        position: 'auto',
+        color: 'auto',
+        opacity: 0.8,
+        scale: 1,
+        margin: 0.02,
+      },
     };
     admin['metadataReader'] = { read: async () => ({ location: 'Nueva' }) };
     admin['processor'] = {
-      process: async () => ({
-        originalWidth: 2400,
-        originalHeight: 1600,
-        credit,
-        variants: [],
-      }),
+      process: async (
+        _file: File,
+        _creditText: string,
+        creditConfig: unknown,
+      ) => {
+        processedCredit = creditConfig;
+        return {
+          originalWidth: 2400,
+          originalHeight: 1600,
+          credit,
+          variants: [],
+        };
+      },
     };
     admin['repository'] = {
       uploadOriginal: async () =>
@@ -614,6 +628,7 @@ test('replaces a photo with the same base name without changing its metadata or 
       ids: Object.keys(draft.photos),
       order: draft.photoOrder,
       photo: draft.photos.photo,
+      processedCredit,
     };
   });
 
@@ -629,6 +644,13 @@ test('replaces a photo with the same base name without changing its metadata or 
     width: 2400,
     height: 1600,
     publicPaths: ['public/published-album/photo/new.webp'],
+  });
+  expect(result.processedCredit).toEqual({
+    position: 'top-left',
+    color: 'dark',
+    opacity: 0.65,
+    scale: 1.3,
+    margin: 0.04,
   });
   expect(result.calls).toEqual([
     'publish',
