@@ -20,6 +20,13 @@ import { pageStyles } from './page-styles.js';
 
 type EditorSection = 'albums' | 'settings';
 
+const photoFileKey = (fileName: string) =>
+  fileName
+    .normalize('NFC')
+    .trim()
+    .replace(/\.[^.]+$/, '')
+    .toLocaleLowerCase();
+
 export class AdminPage extends LitElement {
   private readonly auth = new AuthService();
   private readonly repository = new GalleryRepository();
@@ -283,6 +290,55 @@ export class AdminPage extends LitElement {
         padding: 1rem;
         border: 1px dashed var(--color-border);
         border-radius: 0.35rem;
+      }
+
+      .duplicate-editor {
+        display: grid;
+        gap: 1rem;
+        padding: 1rem;
+        border: 1px solid #b68748;
+        border-radius: 0.35rem;
+        background: color-mix(in srgb, var(--color-surface) 88%, #b68748);
+      }
+
+      .duplicate-editor h2,
+      .duplicate-editor p {
+        margin: 0;
+      }
+
+      .duplicate-group {
+        display: grid;
+        gap: 0.75rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--color-border);
+      }
+
+      .duplicate-photos {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+        gap: 0.75rem;
+      }
+
+      .duplicate-photo {
+        display: grid;
+        gap: 0.55rem;
+        padding: 0.65rem;
+        border: 1px solid var(--color-border);
+        border-radius: 0.25rem;
+        background: var(--color-background);
+      }
+
+      .duplicate-photo img {
+        width: 100%;
+        aspect-ratio: 4 / 3;
+        object-fit: cover;
+        border-radius: 0.15rem;
+        background: var(--color-surface);
+      }
+
+      .duplicate-photo p {
+        color: var(--color-text-muted);
+        font-size: 0.8rem;
       }
 
       .order-grid {
@@ -615,6 +671,7 @@ export class AdminPage extends LitElement {
         ${photos.map((photo, index) => this.renderPhotoEditor(photo, index))}
       </section>
 
+      ${this.renderDuplicatePhotos(album)}
       ${
         photos.length
           ? html`<section
@@ -633,6 +690,60 @@ export class AdminPage extends LitElement {
           : ''
       }
     </form>`;
+  }
+
+  private renderDuplicatePhotos(album: Album) {
+    const duplicateGroups = this.duplicatePhotoGroups(album);
+    if (duplicateGroups.length === 0) return nothing;
+    return html`<section
+      class="duplicate-editor"
+      aria-labelledby="duplicates-title"
+    >
+      <div>
+        <span class="eyebrow">Revisión necesaria</span>
+        <h2 id="duplicates-title">Duplicados detectados</h2>
+        <p class="hint">
+          Estas fotos comparten nombre base aunque su extensión sea distinta.
+          Elige cuál conservar; las demás se eliminarán.
+        </p>
+      </div>
+      ${duplicateGroups.map(
+        group =>
+          html`<section class="duplicate-group">
+            <strong>${photoFileKey(group[0]?.fileName ?? '')}</strong>
+            <div class="duplicate-photos">
+              ${group.map(
+              photo =>
+                html`<article class="duplicate-photo">
+                  <img src=${photo.urls.thumbnail} alt=${photo.altText} />
+                  <strong>${photo.fileName}</strong>
+                  <p>
+                    ${photo.width} × ${photo.height} ·
+                    ${photo.visible ? 'Visible' : 'Oculta'}
+                  </p>
+                  <button
+                    type="button"
+                    class="primary"
+                    ?disabled=${this.busy}
+                    @click=${() => this.retainDuplicate(photo, group)}
+                  >
+                    Conservar esta
+                  </button>
+                </article>`,
+            )}
+            </div>
+          </section>`,
+      )}
+    </section>`;
+  }
+
+  private duplicatePhotoGroups(album: Album): GalleryPhoto[][] {
+    const groups = new Map<string, GalleryPhoto[]>();
+    for (const photo of Object.values(album.photos)) {
+      const key = photoFileKey(photo.fileName);
+      groups.set(key, [...(groups.get(key) ?? []), photo]);
+    }
+    return [...groups.values()].filter(group => group.length > 1);
   }
 
   private renderPhotoEditor(photo: GalleryPhoto, index: number) {
@@ -1041,10 +1152,23 @@ export class AdminPage extends LitElement {
     this.busy = true;
     this.error = '';
     try {
+      const replacedPaths: string[][] = [];
+      let replacements = 0;
       for (let index = 0; index < files.length; index += 1) {
         const file = files[index];
         if (!file) continue;
-        const photoId = crypto.randomUUID();
+        const matchingPhotos: GalleryPhoto[] = Object.values(
+          this.draft.photos,
+        ).filter(
+          photo => photoFileKey(photo.fileName) === photoFileKey(file.name),
+        );
+        const existing: GalleryPhoto | undefined =
+          matchingPhotos.find(photo => photo.fileName === file.name) ??
+          matchingPhotos[0];
+        const duplicates = matchingPhotos.filter(
+          photo => photo.id !== existing?.id,
+        );
+        const photoId = existing?.id ?? crypto.randomUUID();
         this.message = `Leyendo metadatos ${index + 1} de ${files.length}: ${file.name}`;
         this.uploadProgress = index / files.length;
         this.requestUpdate();
@@ -1079,27 +1203,77 @@ export class AdminPage extends LitElement {
           .replace(/\.[^.]+$/, '')
           .replace(/[-_]+/g, ' ');
         const photo: GalleryPhoto = {
+          ...existing,
           id: photoId,
           albumId: this.draft.id,
           fileName: file.name,
           width: result.originalWidth,
           height: result.originalHeight,
-          caption: '',
-          location: metadata.location ?? this.draft.location,
-          takenAt: metadata.takenAt ?? this.draft.startDate,
-          altText: fallbackAlt,
-          visible: true,
+          caption: existing?.caption ?? '',
+          location:
+            existing?.location ?? metadata.location ?? this.draft.location,
+          takenAt:
+            existing?.takenAt ?? metadata.takenAt ?? this.draft.startDate,
+          altText: existing?.altText ?? fallbackAlt,
+          visible: existing?.visible ?? true,
           originalPath,
           publicPaths: uploaded.paths,
           urls: uploaded.urls,
           credit: result.credit,
         };
         this.draft.photos[photoId] = photo;
-        this.draft.photoOrder.push(photoId);
+        if (existing) {
+          replacements += 1;
+          const activePaths = new Set<string>([
+            originalPath,
+            ...uploaded.paths,
+          ]);
+          replacedPaths.push(
+            [
+              existing.originalPath,
+              ...existing.publicPaths,
+              ...duplicates.flatMap(duplicate => [
+                duplicate.originalPath,
+                ...duplicate.publicPaths,
+              ]),
+            ].filter(
+              (path): path is string =>
+                path !== undefined && !activePaths.has(path),
+            ),
+          );
+          for (const duplicate of duplicates) {
+            delete this.draft.photos[duplicate.id];
+          }
+          this.draft.photoOrder = this.draft.photoOrder.filter(
+            id => !duplicates.some(duplicate => duplicate.id === id),
+          );
+          if (duplicates.some(photo => photo.id === this.draft?.coverPhotoId)) {
+            this.draft.coverPhotoId = photoId;
+          }
+        } else {
+          this.draft.photoOrder.push(photoId);
+        }
         this.draft.coverPhotoId ??= photoId;
       }
-      await this.repository.saveAlbum(this.draft);
-      this.message = `${files.length} fotografía${files.length === 1 ? '' : 's'} agregada${files.length === 1 ? '' : 's'}.`;
+      if (this.draft.status === 'published') {
+        await this.repository.publishAlbum(this.draft, this.albums);
+      } else {
+        await this.repository.saveAlbum(this.draft);
+      }
+      await Promise.all(
+        replacedPaths.map(paths => this.repository.deletePaths(paths)),
+      );
+      const additions = files.length - replacements;
+      this.message = [
+        additions
+          ? `${additions} fotografía${additions === 1 ? '' : 's'} agregada${additions === 1 ? '' : 's'}.`
+          : '',
+        replacements
+          ? `${replacements} fotografía${replacements === 1 ? '' : 's'} reemplazada${replacements === 1 ? '' : 's'}.`
+          : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
       this.uploadProgress = 0;
     } catch (error) {
       this.setError(error);
@@ -1162,6 +1336,41 @@ export class AdminPage extends LitElement {
       this.uploadProgress = 0;
       this.requestUpdate();
     }
+  }
+
+  private async retainDuplicate(
+    kept: GalleryPhoto,
+    group: readonly GalleryPhoto[],
+  ) {
+    if (!this.draft) return;
+    const duplicates = group.filter(photo => photo.id !== kept.id);
+    if (duplicates.length === 0) return;
+    const confirmed = window.confirm(
+      `¿Conservar ${kept.fileName} y eliminar ${duplicates
+        .map(photo => photo.fileName)
+        .join(', ')}? Esta acción borrará sus originales y variantes.`,
+    );
+    if (!confirmed) return;
+    await this.run(async () => {
+      if (!this.draft) return;
+      for (const duplicate of duplicates) {
+        delete this.draft.photos[duplicate.id];
+      }
+      this.draft.photoOrder = this.draft.photoOrder.filter(
+        id => !duplicates.some(duplicate => duplicate.id === id),
+      );
+      if (duplicates.some(photo => photo.id === this.draft?.coverPhotoId)) {
+        this.draft.coverPhotoId = kept.id;
+      }
+      if (this.draft.status === 'published') {
+        await this.repository.publishAlbum(this.draft, this.albums);
+      } else {
+        await this.repository.saveAlbum(this.draft);
+      }
+      await Promise.all(
+        duplicates.map(photo => this.repository.deletePhotoFiles(photo)),
+      );
+    }, `Se conservó ${kept.fileName} y se eliminaron los duplicados.`);
   }
 
   private async deletePhoto(photo: GalleryPhoto) {

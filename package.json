@@ -8,7 +8,7 @@
   "engines": {
     "node": "24.13.0"
   },
-  "packageManager": "pnpm@11.20.0",
+  "packageManager": "pnpm@11.22.0",
   "scripts": {
     "start": "pnpm run build && web-dev-server --root-dir dist --app-index dist/index.html --port 8000",
     "start:e2e": "FIREBASE_CONFIG_DISABLED=1 pnpm run build && web-dev-server --root-dir dist --app-index dist/index.html --port 8017",
@@ -24,7 +24,7 @@
   "dependencies": {
     "@lit-labs/router": "^0.1.4",
     "exifr": "^7.1.3",
-    "firebase": "^12.17.1",
+    "firebase": "^12.18.0",
     "lit": "^3.3.3"
   },
   "devDependencies": {
@@ -36,17 +36,17 @@
     "@web/dev-server": "^1.0.0",
     "@web/rollup-plugin-html": "^4.0.0",
     "dotenv": "^17.4.2",
-    "eslint": "^10.8.1",
+    "eslint": "^10.9.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-lit": "^2.3.1",
-    "globals": "^17.9.0",
+    "globals": "^17.11.0",
     "playwright": "^1.62.1",
     "prettier": "^3.9.6",
     "rimraf": "^6.1.3",
-    "rollup": "^4.62.4",
+    "rollup": "^4.62.5",
     "rollup-plugin-esbuild": "^6.2.1",
-    "tsx": "^4.23.11",
+    "tsx": "^4.23.12",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "typescript-eslint": "^8.66.0"
+    "typescript-eslint": "^8.67.0"
   }
 }

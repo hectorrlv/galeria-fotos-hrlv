@@ -513,6 +513,242 @@ test('keeps album and photo date inputs inside the mobile editor', async ({
   }
 });
 
+test('replaces a photo with the same base name without changing its metadata or order', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const result = await page.evaluate(async () => {
+    const admin = document.createElement('admin-page') as HTMLElement &
+      Record<string, unknown> & { updateComplete?: Promise<unknown> };
+    document.body.append(admin);
+    await admin.updateComplete;
+
+    const credit = {
+      position: 'auto',
+      color: 'auto',
+      opacity: 0.8,
+      scale: 1,
+      margin: 0.02,
+    };
+    const photo = {
+      id: 'photo',
+      albumId: 'published-album',
+      fileName: 'photo.jpeg',
+      width: 1200,
+      height: 800,
+      caption: 'Pie conservado',
+      location: 'Oaxaca',
+      takenAt: '2026-08-03',
+      altText: 'Texto alternativo conservado',
+      visible: false,
+      originalPath: 'originals/published-album/photo/original.jpg',
+      publicPaths: ['public/published-album/photo/old.webp'],
+      urls: { thumbnail: 'old-thumb', grid: 'old-grid', viewer: 'old-viewer' },
+      credit,
+    };
+    const album = {
+      id: 'published-album',
+      slug: 'album-publicado',
+      title: 'Álbum publicado',
+      description: 'Relato completo del viaje.',
+      country: 'México',
+      location: 'Ciudad de México',
+      startDate: '2026-08-03',
+      endDate: '2026-08-03',
+      category: 'Paseo',
+      coverPhotoId: 'photo',
+      photoOrder: ['photo'],
+      photos: { photo },
+      status: 'published',
+      featured: false,
+      createdAt: 100,
+      updatedAt: 200,
+      publishedAt: 150,
+    };
+    const calls: string[] = [];
+    admin['draft'] = album;
+    admin['albums'] = [album];
+    admin['site'] = {
+      galleryName: 'Galería HRLV',
+      introduction: '',
+      creditText: '@HRLV',
+      about: '',
+      instagramUrl: '',
+      xUrl: '',
+      defaultCredit: credit,
+    };
+    admin['metadataReader'] = { read: async () => ({ location: 'Nueva' }) };
+    admin['processor'] = {
+      process: async () => ({
+        originalWidth: 2400,
+        originalHeight: 1600,
+        credit,
+        variants: [],
+      }),
+    };
+    admin['repository'] = {
+      uploadOriginal: async () =>
+        'originals/published-album/photo/original.jpg',
+      uploadVariants: async () => ({
+        paths: ['public/published-album/photo/new.webp'],
+        urls: {
+          thumbnail: 'new-thumb',
+          grid: 'new-grid',
+          viewer: 'new-viewer',
+        },
+      }),
+      publishAlbum: async () => calls.push('publish'),
+      deletePaths: async (paths: string[]) =>
+        calls.push(`delete:${paths.join(',')}`),
+    };
+    await (admin['uploadPhotos'] as (event: Event) => Promise<void>)({
+      currentTarget: {
+        files: [new File(['replacement'], 'photo.jpg')],
+        value: '',
+      },
+    } as unknown as Event);
+    const draft = admin['draft'] as typeof album;
+    admin.remove();
+    return {
+      calls,
+      ids: Object.keys(draft.photos),
+      order: draft.photoOrder,
+      photo: draft.photos.photo,
+    };
+  });
+
+  expect(result.ids).toEqual(['photo']);
+  expect(result.order).toEqual(['photo']);
+  expect(result.photo).toMatchObject({
+    fileName: 'photo.jpg',
+    caption: 'Pie conservado',
+    location: 'Oaxaca',
+    takenAt: '2026-08-03',
+    altText: 'Texto alternativo conservado',
+    visible: false,
+    width: 2400,
+    height: 1600,
+    publicPaths: ['public/published-album/photo/new.webp'],
+  });
+  expect(result.calls).toEqual([
+    'publish',
+    'delete:public/published-album/photo/old.webp',
+  ]);
+});
+
+test('shows detected duplicates and safely keeps the selected photo', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.evaluate(async () => {
+    const admin = document.createElement('admin-page') as HTMLElement &
+      Record<string, unknown> & { updateComplete?: Promise<unknown> };
+    document.body.append(admin);
+    await admin.updateComplete;
+    const credit = {
+      position: 'auto',
+      color: 'auto',
+      opacity: 0.8,
+      scale: 1,
+      margin: 0.02,
+    };
+    const createPhoto = (id: string, fileName: string) => ({
+      id,
+      albumId: 'album',
+      fileName,
+      width: 1200,
+      height: 800,
+      caption: '',
+      location: '',
+      takenAt: '',
+      altText: fileName,
+      visible: true,
+      originalPath: `originals/album/${id}/original.jpg`,
+      publicPaths: [`public/album/${id}/viewer.webp`],
+      urls: {
+        thumbnail: 'https://example.com/photo.webp',
+        grid: '',
+        viewer: '',
+      },
+      credit,
+    });
+    const jpg = createPhoto('jpg', 'atardecer.jpg');
+    const jpeg = createPhoto('jpeg', 'atardecer.jpeg');
+    const album = {
+      id: 'album',
+      slug: 'album',
+      title: 'Álbum',
+      description: 'Relato',
+      country: 'México',
+      location: '',
+      startDate: '',
+      endDate: '',
+      category: '',
+      coverPhotoId: 'jpeg',
+      photoOrder: ['jpg', 'jpeg'],
+      photos: { jpg, jpeg },
+      status: 'published',
+      featured: false,
+      createdAt: 1,
+      updatedAt: 1,
+      publishedAt: 1,
+    };
+    const calls: string[] = [];
+    admin['draft'] = album;
+    admin['albums'] = [album];
+    admin['repository'] = {
+      publishAlbum: async () => calls.push('publish'),
+      deletePhotoFiles: async (photo: typeof jpeg) =>
+        calls.push(`delete:${photo.id}`),
+    };
+    admin['testCalls'] = calls;
+    admin['render'] = () =>
+      (admin['renderAlbumEditor'] as (value: typeof album) => unknown).call(
+        admin,
+        album,
+      );
+    (admin['requestUpdate'] as () => void).call(admin);
+    await admin.updateComplete;
+  });
+
+  const admin = page.locator('admin-page');
+  await expect(
+    admin.getByRole('heading', { name: 'Duplicados detectados' }),
+  ).toBeVisible();
+  await expect(admin.getByText('atardecer.jpg')).toBeVisible();
+  await expect(admin.getByText('atardecer.jpeg')).toBeVisible();
+
+  await admin.evaluate(async element => {
+    const component = element as HTMLElement & Record<string, unknown>;
+    const originalConfirm = window.confirm;
+    window.confirm = () => true;
+    try {
+      const draft = component['draft'] as {
+        photos: Record<string, unknown>;
+      };
+      const jpg = draft.photos.jpg;
+      const jpeg = draft.photos.jpeg;
+      await (
+        component['retainDuplicate'] as (
+          kept: unknown,
+          group: unknown[],
+        ) => Promise<void>
+      )(jpg, [jpg, jpeg]);
+    } finally {
+      window.confirm = originalConfirm;
+    }
+  });
+
+  await expect
+    .poll(() =>
+      admin.evaluate(
+        element =>
+          (element as HTMLElement & Record<string, unknown>)['testCalls'],
+      ),
+    )
+    .toEqual(['publish', 'delete:jpeg']);
+});
+
 test('publishes regenerated credit before deleting its old variants', async ({
   page,
 }) => {
