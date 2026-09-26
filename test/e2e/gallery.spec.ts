@@ -5,6 +5,13 @@ test('loads the home page and exposes accessible navigation', async ({
 }) => {
   await page.goto('/');
 
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute(
+    'href',
+    '/logo.png',
+  );
+  const brand = page.getByRole('link', { name: 'Galería HRLV' });
+  await expect(brand.locator('img')).toHaveAttribute('src', '/logo.png');
+
   await expect(
     page.getByRole('heading', { name: 'Viajes, paseos y momentos.' }),
   ).toBeVisible();

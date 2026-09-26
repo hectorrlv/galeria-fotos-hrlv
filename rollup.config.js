@@ -3,12 +3,24 @@ import replace from '@rollup/plugin-replace';
 import { rollupPluginHTML as html } from '@web/rollup-plugin-html';
 import dotenv from 'dotenv';
 import esbuildPlugin from 'rollup-plugin-esbuild';
+import { readFileSync } from 'node:fs';
 
 dotenv.config();
 
 const firebaseDisabled = process.env.FIREBASE_CONFIG_DISABLED === '1';
 const firebaseValue = name =>
   JSON.stringify(firebaseDisabled ? '' : (process.env[name] ?? ''));
+
+const logoAsset = () => ({
+  name: 'logo-asset',
+  buildStart() {
+    this.emitFile({
+      type: 'asset',
+      fileName: 'logo.png',
+      source: readFileSync('src/images/logo.png'),
+    });
+  },
+});
 
 export default {
   input: 'index.html',
@@ -34,6 +46,7 @@ export default {
     }),
     nodeResolve({ browser: true }),
     esbuildPlugin({ target: 'es2022' }),
-    html({ minify: true, publicPath: '/' }),
+    logoAsset(),
+    html({ minify: true, publicPath: '/', externalAssets: ['/logo.png'] }),
   ],
 };

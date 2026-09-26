@@ -78,9 +78,18 @@ export class GalleryApp extends LitElement {
       }
 
       .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.55rem;
         font-family: Georgia, 'Times New Roman', serif;
         font-size: 1.15rem;
         text-decoration: none;
+      }
+
+      .brand-logo {
+        width: 2rem;
+        height: 2rem;
+        object-fit: contain;
       }
 
       nav ul {
@@ -182,7 +191,10 @@ export class GalleryApp extends LitElement {
       <a class="skip-link" href="#content">Saltar al contenido</a>
       <header>
         <div class="header-inner">
-          <a class="brand" href="/">Galería HRLV</a>
+          <a class="brand" href="/">
+            <img class="brand-logo" src="/logo.png" alt="" />
+            <span>Galería HRLV</span>
+          </a>
           <nav class="desktop-nav" aria-label="Navegación principal">
             <ul>
               ${publicNavigation.map(
