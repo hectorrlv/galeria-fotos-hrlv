@@ -1,6 +1,7 @@
 import {
   onValue,
   ref as databaseRef,
+  runTransaction,
   set,
   update,
   type Unsubscribe,
@@ -21,19 +22,11 @@ import {
   type SiteConfig,
 } from '../models/gallery.js';
 import { getFirebaseServices } from './client.js';
+import { albumValues, emptyDraftDeletion } from './album-data.js';
 import { publicationChanges } from './publication.js';
 import { versionedOriginalPath } from './storage-paths.js';
 
 type ErrorCallback = (error: Error) => void;
-
-const albumValues = (value: unknown): Album[] => {
-  if (!value || typeof value !== 'object') return [];
-  return Object.values(value as Record<string, Album>).sort(
-    (left, right) =>
-      (right.publishedAt ?? right.updatedAt) -
-      (left.publishedAt ?? left.updatedAt),
-  );
-};
 
 export class GalleryRepository {
   private readonly services = getFirebaseServices();
@@ -104,6 +97,20 @@ export class GalleryRepository {
     const { published, changes } = publicationChanges(album, albums);
     await update(databaseRef(this.services.database), changes);
     return published;
+  }
+
+  async deleteEmptyDraftAlbum(albumId: string): Promise<void> {
+    if (!this.services) throw new Error('Firebase no está configurado.');
+    const result = await runTransaction(
+      databaseRef(this.services.database, `private/albums/${albumId}`),
+      emptyDraftDeletion,
+      { applyLocally: false },
+    );
+    if (!result.committed) {
+      throw new Error(
+        'El álbum ya no es un borrador vacío. Vuelve a seleccionarlo para revisar sus cambios.',
+      );
+    }
   }
 
   async unpublishAlbum(album: Album): Promise<void> {

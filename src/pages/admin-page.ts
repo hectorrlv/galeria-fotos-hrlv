@@ -602,6 +602,18 @@ export class AdminPage extends LitElement {
                   Publicar
                 </button>`
           }
+          ${
+            album.status === 'draft' && Object.keys(album.photos).length === 0
+              ? html`<button
+                  type="button"
+                  class="danger"
+                  @click=${this.deleteEmptyDraft}
+                  ?disabled=${this.busy}
+                >
+                  Eliminar borrador
+                </button>`
+              : nothing
+          }
         </div>
       </div>
 
@@ -1103,6 +1115,28 @@ export class AdminPage extends LitElement {
       await this.repository.unpublishAlbum(this.draft as Album);
       if (this.draft) this.draft.status = 'draft';
     }, 'Álbum retirado de la galería pública.');
+  };
+
+  private readonly deleteEmptyDraft = async () => {
+    const album = this.draft;
+    if (
+      this.busy ||
+      !album ||
+      album.status !== 'draft' ||
+      Object.keys(album.photos).length > 0
+    )
+      return;
+    if (
+      !window.confirm(
+        `¿Eliminar el borrador «${album.title || 'Sin título'}»? Esta acción no se puede deshacer.`,
+      )
+    )
+      return;
+    await this.run(async () => {
+      await this.repository.deleteEmptyDraftAlbum(album.id);
+      this.albums = this.albums.filter(item => item.id !== album.id);
+      if (this.draft?.id === album.id) this.draft = null;
+    }, 'Borrador eliminado.');
   };
 
   private validatedDraft(forPublishing = false): Album | null {
