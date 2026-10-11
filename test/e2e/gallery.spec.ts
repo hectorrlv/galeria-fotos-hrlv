@@ -2,15 +2,30 @@ import { expect, test } from '@playwright/test';
 
 test('loads the home page and exposes accessible navigation', async ({
   page,
-}) => {
+}, testInfo) => {
+  const logoResponse = page.waitForResponse(
+    response => new URL(response.url()).pathname === '/logo.png',
+  );
   await page.goto('/');
+  const response = await logoResponse;
+  expect(response.ok()).toBe(true);
+  expect((await response.body()).byteLength).toBeLessThan(40 * 1024);
 
   await expect(page.locator('link[rel="icon"]')).toHaveAttribute(
     'href',
     '/logo.png',
   );
   const brand = page.getByRole('link', { name: 'Galería HRLV' });
-  await expect(brand.locator('img')).toHaveAttribute('src', '/logo.png');
+  const logo = brand.locator('img');
+  await expect(logo).toHaveAttribute('src', '/logo.png');
+  await expect(logo).toBeVisible();
+  await logo.evaluate(element => (element as HTMLImageElement).decode());
+  expect(
+    await logo.evaluate(element => ({
+      width: (element as HTMLImageElement).naturalWidth,
+      height: (element as HTMLImageElement).naturalHeight,
+    })),
+  ).toEqual({ width: 128, height: 128 });
 
   await expect(
     page.getByRole('heading', { name: 'Viajes, paseos y momentos.' }),
@@ -23,6 +38,7 @@ test('loads the home page and exposes accessible navigation', async ({
     ).toBeVisible();
     await expect(page.getByRole('link', { name: 'Inicio' })).toBeVisible();
   }
+  await page.screenshot({ path: testInfo.outputPath('home.png') });
 });
 
 test('navigates between public routes', async ({ page }) => {
