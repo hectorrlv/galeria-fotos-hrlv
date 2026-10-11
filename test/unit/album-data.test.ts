@@ -26,11 +26,13 @@ test('restores empty collections and nullable fields omitted from saved drafts',
 test('normalizes null collections and preserves Firebase photo order and sorting', () => {
   const older = {
     ...createDraftAlbum(100),
+    startDate: '2000-01-01',
     photos: null,
     photoOrder: null,
   };
   const newer = {
     ...createDraftAlbum(200),
+    startDate: '2026-01-01',
     photoOrder: { 2: 'second', 0: 'first' },
   };
   const [first, second] = albumValues({ older, newer });

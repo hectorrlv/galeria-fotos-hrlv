@@ -7,6 +7,7 @@ import { GalleryRepository } from '../firebase/gallery-repository.js';
 import { BrowserImageProcessor } from '../image-processing/browser-image-processor.js';
 import { PhotoMetadataReader } from '../image-processing/photo-metadata.js';
 import {
+  ALBUM_CATEGORIES,
   DEFAULT_SITE_CONFIG,
   createDraftAlbum,
   orderedPhotos,
@@ -16,6 +17,7 @@ import {
   type SiteConfig,
 } from '../models/gallery.js';
 import { slugify } from '../models/slug.js';
+import { sortAlbums, type AlbumSortOrder } from '../models/album-order.js';
 import { pageStyles } from './page-styles.js';
 
 type EditorSection = 'albums' | 'settings';
@@ -36,6 +38,8 @@ export class AdminPage extends LitElement {
   private authReady = false;
   private albums: Album[] = [];
   private draft: Album | null = null;
+  private albumSort: AlbumSortOrder = 'date-desc';
+  private slugAutomatic = false;
   private site: SiteConfig = structuredClone(DEFAULT_SITE_CONFIG);
   private section: EditorSection = 'albums';
   private message = '';
@@ -119,6 +123,7 @@ export class AdminPage extends LitElement {
 
       .field-grid {
         display: grid;
+        align-items: start;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 1rem;
       }
@@ -537,10 +542,34 @@ export class AdminPage extends LitElement {
           <h2>Álbumes</h2>
           <button class="primary" @click=${this.createAlbum}>Nuevo</button>
         </div>
+        <label>
+          Orden
+          <select
+            aria-label="Orden"
+            .value=${this.albumSort}
+            @change=${(event: Event) => {
+              this.albumSort =
+                (event.currentTarget as HTMLSelectElement).value === 'date-asc'
+                  ? 'date-asc'
+                  : 'date-desc';
+              this.requestUpdate();
+            }}
+          >
+            <option
+              value="date-desc"
+              ?selected=${this.albumSort === 'date-desc'}
+            >
+              Viajes más recientes
+            </option>
+            <option value="date-asc" ?selected=${this.albumSort === 'date-asc'}>
+              Viajes más antiguos
+            </option>
+          </select>
+        </label>
         <div class="album-list">
           ${
             this.albums.length
-              ? this.albums.map(
+              ? sortAlbums(this.albums, this.albumSort).map(
                   album =>
                     html`<button
                       aria-current=${this.draft?.id === album.id}
@@ -619,12 +648,25 @@ export class AdminPage extends LitElement {
 
       <div class="field-grid">
         ${this.albumInput('Título', 'title', album.title, true)}
-        ${this.albumInput('URL corta', 'slug', album.slug, true)}
+        <div>
+          ${this.albumInput('URL corta', 'slug', album.slug, true)}
+          <p class="hint">
+            «París y Versalles» se convierte en paris-y-versalles:
+            /album/paris-y-versalles. Puedes personalizarla; cambiar el título
+            de un álbum guardado no cambia su URL.
+          </p>
+        </div>
         ${this.albumInput('País', 'country', album.country)}
-        ${this.albumInput('Lugar', 'location', album.location)}
+        <div>
+          ${this.albumInput('Lugares del álbum', 'location', album.location)}
+          <p class="hint">
+            Resume los lugares del viaje, por ejemplo «París y Versalles». Este
+            texto no se asigna a las fotos; cada una tiene su propio lugar.
+          </p>
+        </div>
         ${this.albumInput('Fecha inicial', 'startDate', album.startDate, false, 'date')}
         ${this.albumInput('Fecha final', 'endDate', album.endDate, false, 'date')}
-        ${this.albumInput('Tipo de paseo', 'category', album.category)}
+        ${this.renderCategorySelect(album.category)}
         <label class="checkbox">
           <input
             type="checkbox"
@@ -1008,12 +1050,14 @@ export class AdminPage extends LitElement {
 
   private readonly createAlbum = () => {
     this.draft = createDraftAlbum();
+    this.slugAutomatic = true;
     this.clearMessages();
     this.requestUpdate();
   };
 
   private selectAlbum(album: Album) {
     this.draft = structuredClone(album);
+    this.slugAutomatic = false;
     this.clearMessages();
     this.requestUpdate();
   }
@@ -1033,13 +1077,15 @@ export class AdminPage extends LitElement {
         .value=${value}
         ?required=${required}
         @input=${this.updateAlbumField}
+        @change=${name === 'slug' ? this.normalizeSlug : nothing}
       />
     </label>`;
   }
 
   private readonly updateAlbumField = (event: Event) => {
     if (!this.draft) return;
-    const input = event.currentTarget as HTMLInputElement | HTMLTextAreaElement;
+    const input = event.currentTarget as
+      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
     const name = input.name as
       | 'title'
       | 'slug'
@@ -1049,11 +1095,36 @@ export class AdminPage extends LitElement {
       | 'endDate'
       | 'category'
       | 'description';
-    this.draft[name] = name === 'slug' ? slugify(input.value) : input.value;
-    if (name === 'title' && !this.draft.slug)
+    this.draft[name] = input.value;
+    if (name === 'slug') this.slugAutomatic = false;
+    if (name === 'title' && this.slugAutomatic)
       this.draft.slug = slugify(input.value);
     this.requestUpdate();
   };
+
+  private readonly normalizeSlug = () => {
+    if (!this.draft) return;
+    this.draft.slug = slugify(this.draft.slug);
+    this.requestUpdate();
+  };
+
+  private renderCategorySelect(category: string) {
+    const legacy =
+      category && !ALBUM_CATEGORIES.some(option => option === category);
+    return html`<label>
+      Tipo de paseo
+      <select
+        name="category"
+        aria-label="Tipo de paseo"
+        .value=${category}
+        @change=${this.updateAlbumField}
+      >
+        <option value="" ?selected=${!category}>Selecciona un tipo</option>
+        ${legacy ? html`<option value=${category} selected>${category} (valor anterior)</option>` : nothing}
+        ${ALBUM_CATEGORIES.map(option => html`<option value=${option} ?selected=${category === option}>${option}</option>`)}
+      </select>
+    </label>`;
+  }
 
   private photoInput(
     photo: GalleryPhoto,
@@ -1093,6 +1164,7 @@ export class AdminPage extends LitElement {
         } else {
           await this.repository.saveAlbum(album);
         }
+        if (this.draft?.id === album.id) this.slugAutomatic = false;
       },
       isPublished ? 'Cambios publicados.' : successMessage,
     );
@@ -1106,6 +1178,7 @@ export class AdminPage extends LitElement {
       album.status = published.status;
       album.updatedAt = published.updatedAt;
       album.publishedAt = published.publishedAt;
+      if (this.draft?.id === album.id) this.slugAutomatic = false;
     }, 'Álbum publicado.');
   };
 
@@ -1245,8 +1318,7 @@ export class AdminPage extends LitElement {
           width: result.originalWidth,
           height: result.originalHeight,
           caption: existing?.caption ?? '',
-          location:
-            existing?.location ?? metadata.location ?? this.draft.location,
+          location: existing?.location ?? metadata.location ?? '',
           takenAt:
             existing?.takenAt ?? metadata.takenAt ?? this.draft.startDate,
           altText: existing?.altText ?? fallbackAlt,
@@ -1295,6 +1367,7 @@ export class AdminPage extends LitElement {
       } else {
         await this.repository.saveAlbum(this.draft);
       }
+      this.slugAutomatic = false;
       await Promise.all(
         replacedPaths.map(paths => this.repository.deletePaths(paths)),
       );

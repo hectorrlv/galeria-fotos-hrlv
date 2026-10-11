@@ -1,5 +1,15 @@
 export type AlbumStatus = 'draft' | 'published' | 'archived';
 
+export const ALBUM_CATEGORIES = [
+  'Viaje',
+  'Paseo urbano',
+  'Naturaleza',
+  'Playa',
+  'Excursión',
+  'Evento',
+  'Otro',
+] as const;
+
 export type CreditPosition =
   'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 

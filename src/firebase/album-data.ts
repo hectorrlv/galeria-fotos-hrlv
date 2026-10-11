@@ -1,4 +1,5 @@
 import type { Album } from '../models/gallery.js';
+import { sortAlbums } from '../models/album-order.js';
 
 type StoredAlbum = Omit<
   Album,
@@ -13,8 +14,8 @@ type StoredAlbum = Omit<
 // Realtime Database omits empty collections and null-valued fields.
 export const albumValues = (value: unknown): Album[] => {
   if (!value || typeof value !== 'object') return [];
-  return Object.values(value as Record<string, StoredAlbum>)
-    .map(album => ({
+  return sortAlbums(
+    Object.values(value as Record<string, StoredAlbum>).map(album => ({
       ...album,
       photos: album.photos ?? {},
       photoOrder: Object.values(album.photoOrder ?? {}).filter(
@@ -22,12 +23,8 @@ export const albumValues = (value: unknown): Album[] => {
       ),
       coverPhotoId: album.coverPhotoId ?? null,
       publishedAt: album.publishedAt ?? null,
-    }))
-    .sort(
-      (left, right) =>
-        (right.publishedAt ?? right.updatedAt) -
-        (left.publishedAt ?? left.updatedAt),
-    );
+    })),
+  );
 };
 
 export const emptyDraftDeletion = (value: unknown): null | undefined => {

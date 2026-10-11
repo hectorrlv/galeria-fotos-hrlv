@@ -569,6 +569,15 @@ test('replaces a photo with the same base name without changing its metadata or 
       urls: { thumbnail: 'old-thumb', grid: 'old-grid', viewer: 'old-viewer' },
       credit,
     };
+    // A published album needs a visible photo while the hidden one is replaced.
+    const visiblePhoto = {
+      ...photo,
+      id: 'visible',
+      fileName: 'visible.jpg',
+      visible: true,
+      originalPath: 'originals/published-album/visible/original.jpg',
+      publicPaths: ['public/published-album/visible/old.webp'],
+    };
     const album = {
       id: 'published-album',
       slug: 'album-publicado',
@@ -579,9 +588,9 @@ test('replaces a photo with the same base name without changing its metadata or 
       startDate: '2026-08-03',
       endDate: '2026-08-03',
       category: 'Paseo',
-      coverPhotoId: 'photo',
-      photoOrder: ['photo'],
-      photos: { photo },
+      coverPhotoId: 'visible',
+      photoOrder: ['photo', 'visible'],
+      photos: { photo, visible: visiblePhoto },
       status: 'published',
       featured: false,
       createdAt: 100,
@@ -655,8 +664,8 @@ test('replaces a photo with the same base name without changing its metadata or 
     };
   });
 
-  expect(result.ids).toEqual(['photo']);
-  expect(result.order).toEqual(['photo']);
+  expect(result.ids).toEqual(['photo', 'visible']);
+  expect(result.order).toEqual(['photo', 'visible']);
   expect(result.photo).toMatchObject({
     fileName: 'photo.jpg',
     caption: 'Pie conservado',
