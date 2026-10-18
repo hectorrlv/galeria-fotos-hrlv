@@ -75,14 +75,18 @@ visitantes solo pueden leer `/public` en Database y Storage.
 
 ## Modelo de datos
 
-- `/private/albums/{albumId}` conserva borradores, originales y configuración
-  de trabajo.
+- `/private/photos/{photoId}` conserva una única fotografía, sus metadatos,
+  crédito y rutas de archivos. No pertenece a un álbum concreto.
+- `/private/albums/{albumId}/photoRefs/{photoId}` conserva la asociación y
+  visibilidad de la fotografía en ese álbum. Orden y portada son propios del álbum.
+- `/private/schemaVersion: 2` indica que se completó la conversión al modelo compartido.
 - `/public/albums/{albumId}` contiene snapshots sanitizados de álbumes
   publicados.
 - `/private/site` y `/public/site` contienen la identidad y los valores
   predeterminados del crédito.
-- `originals/{albumId}/{photoId}` guarda el archivo intacto.
-- `public/{albumId}/{photoId}` guarda miniatura, cuadrícula y visor en WebP.
+- `originals/photos/{photoId}` guarda los nuevos originales intactos.
+- `public/photos/{photoId}` guarda sus miniaturas, cuadrícula y visor en WebP.
+  Los archivos anteriores conservan sus rutas; la migración no los mueve.
 
 ## Flujo editorial
 
@@ -95,3 +99,78 @@ visitantes solo pueden leer `/public` en Database y Storage.
 La generación de derivados ocurre en el navegador. El original se carga por
 separado y nunca se modifica. Retirar un álbum elimina su snapshot de Database,
 pero conserva el borrador privado y sus archivos.
+
+### Fotografías compartidas
+
+Desde cada álbum, **Elegir fotos existentes** permite buscar por nombre y agregar
+varias fotografías sin subir archivos de nuevo. Las ya incluidas están marcadas.
+El pie, lugar, fecha, texto alternativo, imagen y crédito son compartidos. Guardar
+sus cambios actualiza sus apariciones públicas, incluso desde un borrador, sin
+publicar otros cambios pendientes de los demás álbumes. El orden, portada y
+visibilidad se conservan por álbum. Cambiar las opciones de crédito conserva el
+flujo de revisión: usa **Regenerar crédito** para aplicarlas a los archivos WebP.
+
+**Quitar del álbum** conserva la foto para reutilizarla. **Eliminar definitivamente**
+solo aparece en el selector para fotografías sin álbumes. El repositorio vuelve a
+comprobar las asociaciones dentro de una transacción antes de borrar archivos.
+Si Storage falla, el selector permite reintentar la eliminación; la foto queda
+bloqueada para nuevas asociaciones mientras tanto. La última fotografía visible
+de un álbum publicado no puede quitarse ni ocultarse: primero retira el álbum.
+
+Cargar archivos con nombres iguales crea fotografías distintas. **Reemplazar
+archivo** es una acción explícita que cambia la imagen en todos sus álbumes.
+Resolver duplicados solo quita asociaciones del álbum actual.
+
+### Migración al modelo compartido
+
+La herramienta trabaja únicamente con una exportación JSON local de la **raíz**
+de Realtime Database. No se conecta a Firebase ni importa datos automáticamente.
+Sin migración, el nuevo administrador permite consultar los álbumes anteriores,
+pero bloquea su edición. Una base nueva y vacía se inicializa al guardar.
+
+```sh
+# Simulación: no crea ni modifica archivos.
+node --import tsx scripts/migrate-shared-photos.mjs /ruta/exportacion.json
+
+# Crea un respaldo privado junto al original y un archivo nuevo para importar.
+# Nunca sobrescribe la exportación ni una salida existente.
+node --import tsx scripts/migrate-shared-photos.mjs /ruta/exportacion.json \
+  --apply --output /ruta/migrado.json
+```
+
+La conversión conserva URLs, archivos, orden, portadas, visibilidad y los
+snapshots públicos existentes. No fusiona por nombre; si dos registros antiguos
+comparten ID, asigna otro ID a la colisión y remapea sus referencias. Repetir la
+conversión sobre una exportación con versión 2 no vuelve a convertirla.
+
+Para una publicación posterior autorizada:
+
+1. Pausa la edición y cierra todas las sesiones de administración. Exporta la
+   raíz desde Firebase Console y conserva el respaldo fuera del repositorio.
+2. Ejecuta la simulación y conversión; verifica el resultado en un emulador o
+   proyecto de prueba antes de importar datos reales.
+3. Manteniendo la pausa, despliega las reglas revisadas e importa la exportación
+   convertida desde Console. Publica después el nuevo Hosting y abre una sesión
+   nueva para verificar el selector, un álbum compartido y la galería pública.
+4. Si hay que revertir antes de reanudar la edición, restaura el respaldo,
+   las reglas y Hosting de la versión anterior durante la misma pausa. No uses
+   un respaldo antiguo para revertir después de nuevas ediciones.
+
+Las reglas permiten al mismo UID administrador leer y escribir la raíz para
+coordinar fotografías y snapshots públicos en una transacción. Los visitantes
+siguen leyendo solo `/public`; `/private` y los originales conservan su acceso
+privado. Las reglas rechazan fotos embebidas del administrador antiguo tras
+activar la versión 2 y prohíben `originalPath` en snapshots públicos.
+
+### Validación con emulador
+
+Además de `pnpm check` y `pnpm test:e2e`, con Java y Firebase CLI instalados:
+
+```sh
+firebase emulators:exec --project demo-gallery-shared --only database \
+  'node --import tsx --test test/integration/shared-photos.test.ts'
+```
+
+Estas pruebas rechazan direcciones de emulador que no sean locales. Cubren
+permisos, asociaciones, propagación pública, conflictos entre sesiones y
+reintentos de eliminación sin tocar servicios reales.

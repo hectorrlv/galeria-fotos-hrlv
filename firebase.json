@@ -9,5 +9,10 @@
   },
   "storage": {
     "rules": "storage.rules"
+  },
+  "emulators": {
+    "database": { "host": "127.0.0.1", "port": 9019 },
+    "ui": { "enabled": false },
+    "singleProjectMode": true
   }
 }

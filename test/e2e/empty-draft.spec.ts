@@ -25,6 +25,7 @@ const mountEmptyDraft = async (page: Page, rejectDeletion = false) => {
     admin['repository'] = {
       saveAlbum: async (updated: typeof album) => {
         calls.push({ saved: structuredClone(updated) });
+        return structuredClone(updated);
       },
       deleteEmptyDraftAlbum: async (id: string) => {
         calls.push({ deleted: id });

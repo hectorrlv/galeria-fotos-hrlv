@@ -13,9 +13,16 @@ import {
   orderedPhotos,
   type Album,
   type GalleryPhoto,
+  type PhotoEdit,
+  type SharedPhoto,
   type PhotoCredit,
   type SiteConfig,
 } from '../models/gallery.js';
+import {
+  photoAlbums,
+  samePhoto,
+  sharedPhoto,
+} from '../firebase/shared-photos.js';
 import { slugify } from '../models/slug.js';
 import { sortAlbums, type AlbumSortOrder } from '../models/album-order.js';
 import { pageStyles } from './page-styles.js';
@@ -51,6 +58,14 @@ export class AdminPage extends LitElement {
   private photoFeedbackError = '';
   private regeneratingPhotoId = '';
   private draggedPhotoId = '';
+  private libraryPhotos: SharedPhoto[] = [];
+  private deletingPhotoIds: string[] = [];
+  private photoBaseline: Record<string, SharedPhoto> = {};
+  private libraryOpen = false;
+  private librarySearch = '';
+  private librarySelection = new Set<string>();
+  private libraryWritable = true;
+  private unsubscribePhotos?: () => void;
   private unsubscribeAuth?: () => void;
   private unsubscribeAlbums?: () => void;
   private unsubscribeSite?: () => void;
@@ -58,6 +73,69 @@ export class AdminPage extends LitElement {
   static styles = [
     pageStyles,
     css`
+      .album-fields {
+        border: 0;
+        padding: 0;
+        margin: 0;
+        min-width: 0;
+        display: grid;
+        gap: 1.5rem;
+      }
+
+      .photo-library {
+        width: min(58rem, calc(100vw - 2rem));
+        max-height: calc(100dvh - 2rem);
+        box-sizing: border-box;
+        overflow: auto;
+        padding: clamp(1rem, 3vw, 2rem);
+        border: 1px solid var(--color-border);
+        border-radius: 1rem;
+        background: var(--color-background);
+        color: var(--color-text);
+      }
+
+      .photo-library::backdrop {
+        background: rgb(0 0 0 / 0.7);
+      }
+
+      .library-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(min(100%, 12rem), 1fr));
+        gap: 1rem;
+        margin-block: 1.5rem;
+      }
+
+      .library-card {
+        min-width: 0;
+        border: 1px solid var(--color-border);
+        border-radius: 0.6rem;
+        padding: 0.75rem;
+        overflow-wrap: anywhere;
+      }
+
+      .library-card img {
+        width: 100%;
+        aspect-ratio: 4 / 3;
+        object-fit: cover;
+        border-radius: 0.3rem;
+      }
+
+      .library-card label {
+        display: grid;
+        gap: 0.5rem;
+      }
+
+      .library-card input {
+        width: auto;
+      }
+
+      .library-actions {
+        position: sticky;
+        bottom: -1px;
+        padding-block: 0.75rem;
+        background: var(--color-background);
+      }
+
       *,
       *::before,
       *::after {
@@ -425,6 +503,7 @@ export class AdminPage extends LitElement {
       this.user = user;
       this.authReady = true;
       this.unsubscribeAlbums?.();
+      this.unsubscribePhotos?.();
       this.unsubscribeSite?.();
       if (isAdminUid(user?.uid)) this.subscribePrivateData();
       this.requestUpdate();
@@ -434,8 +513,15 @@ export class AdminPage extends LitElement {
   disconnectedCallback() {
     this.unsubscribeAuth?.();
     this.unsubscribeAlbums?.();
+    this.unsubscribePhotos?.();
     this.unsubscribeSite?.();
     super.disconnectedCallback();
+  }
+
+  updated() {
+    const dialog =
+      this.renderRoot.querySelector<HTMLDialogElement>('.photo-library');
+    if (this.libraryOpen && dialog && !dialog.open) dialog.showModal();
   }
 
   render() {
@@ -514,6 +600,7 @@ export class AdminPage extends LitElement {
         <button
           role="tab"
           aria-selected=${this.section === 'albums'}
+          ?disabled=${this.busy}
           @click=${() => this.setSection('albums')}
         >
           Álbumes
@@ -521,6 +608,7 @@ export class AdminPage extends LitElement {
         <button
           role="tab"
           aria-selected=${this.section === 'settings'}
+          ?disabled=${this.busy}
           @click=${() => this.setSection('settings')}
         >
           Configuración
@@ -540,7 +628,13 @@ export class AdminPage extends LitElement {
       <aside class="panel">
         <div class="toolbar">
           <h2>Álbumes</h2>
-          <button class="primary" @click=${this.createAlbum}>Nuevo</button>
+          <button
+            class="primary"
+            @click=${this.createAlbum}
+            ?disabled=${this.busy || !this.libraryWritable}
+          >
+            Nuevo
+          </button>
         </div>
         <label>
           Orden
@@ -573,6 +667,7 @@ export class AdminPage extends LitElement {
                   album =>
                     html`<button
                       aria-current=${this.draft?.id === album.id}
+                      ?disabled=${this.busy}
                       @click=${() => this.selectAlbum(album)}
                     >
                       <strong>${album.title || 'Sin título'}</strong>
@@ -598,152 +693,311 @@ export class AdminPage extends LitElement {
 
   private renderAlbumEditor(album: Album) {
     const photos = orderedPhotos(album);
-    return html`<form @submit=${this.saveDraft}>
-      <div class="toolbar">
-        <div>
-          <span class="eyebrow">${this.statusLabel(album.status)}</span>
-          <h2>${album.title || 'Nuevo álbum'}</h2>
-        </div>
-        <div class="actions">
-          <button type="submit" ?disabled=${this.busy}>
-            ${
-              album.status === 'published'
-                ? 'Guardar cambios'
-                : 'Guardar borrador'
-            }
-          </button>
-          ${
-            album.status === 'published'
-              ? html`<button
-                  type="button"
-                  class="danger"
-                  @click=${this.unpublish}
-                  ?disabled=${this.busy}
-                >
-                  Retirar
-                </button>`
-              : html`<button
-                  type="button"
-                  class="primary"
-                  @click=${this.publish}
-                  ?disabled=${this.busy}
-                >
-                  Publicar
-                </button>`
-          }
-          ${
-            album.status === 'draft' && Object.keys(album.photos).length === 0
-              ? html`<button
-                  type="button"
-                  class="danger"
-                  @click=${this.deleteEmptyDraft}
-                  ?disabled=${this.busy}
-                >
-                  Eliminar borrador
-                </button>`
-              : nothing
-          }
-        </div>
-      </div>
-
-      <div class="field-grid">
-        ${this.albumInput('Título', 'title', album.title, true)}
-        <div>
-          ${this.albumInput('URL corta', 'slug', album.slug, true)}
-          <p class="hint">
-            «París y Versalles» se convierte en paris-y-versalles:
-            /album/paris-y-versalles. Puedes personalizarla; cambiar el título
-            de un álbum guardado no cambia su URL.
-          </p>
-        </div>
-        ${this.albumInput('País', 'country', album.country)}
-        <div>
-          ${this.albumInput('Lugares del álbum', 'location', album.location)}
-          <p class="hint">
-            Resume los lugares del viaje, por ejemplo «París y Versalles». Este
-            texto no se asigna a las fotos; cada una tiene su propio lugar.
-          </p>
-        </div>
-        ${this.albumInput('Fecha inicial', 'startDate', album.startDate, false, 'date')}
-        ${this.albumInput('Fecha final', 'endDate', album.endDate, false, 'date')}
-        ${this.renderCategorySelect(album.category)}
-        <label class="checkbox">
-          <input
-            type="checkbox"
-            .checked=${album.featured}
-            @change=${(event: Event) => {
-              album.featured = (
-                event.currentTarget as HTMLInputElement
-              ).checked;
-              this.requestUpdate();
-            }}
-          />
-          Viaje destacado
-        </label>
-      </div>
-      <label>
-        Relato del viaje
-        <textarea
-          name="description"
-          .value=${album.description}
-          @input=${this.updateAlbumField}
-        ></textarea>
-      </label>
-
-      <section class="photos-editor">
-        <div class="toolbar">
-          <div>
-            <h2>Fotografías</h2>
-            <p class="hint">
-              Edita los datos de cada fotografía. El original permanece privado
-              y sin modificaciones.
-            </p>
-            <p class="metadata-attribution">
-              Las ubicaciones se resuelven con datos de OpenStreetMap.
-            </p>
+    return html`${!this.libraryWritable ? html`<p class="status" role="status">La biblioteca necesita migración. Puedes consultar los álbumes; la edición estará disponible después de convertir los datos.</p>` : nothing}
+      <form @submit=${this.saveDraft}>
+        <fieldset
+          class="album-fields"
+          ?disabled=${!this.libraryWritable || this.busy}
+        >
+          <div class="toolbar">
+            <div>
+              <span class="eyebrow">${this.statusLabel(album.status)}</span>
+              <h2>${album.title || 'Nuevo álbum'}</h2>
+            </div>
+            <div class="actions">
+              <button type="submit" ?disabled=${this.busy}>
+                ${
+                  album.status === 'published'
+                    ? 'Guardar cambios'
+                    : 'Guardar borrador'
+                }
+              </button>
+              ${
+                album.status === 'published'
+                  ? html`<button
+                      type="button"
+                      class="danger"
+                      @click=${this.unpublish}
+                      ?disabled=${this.busy}
+                    >
+                      Retirar
+                    </button>`
+                  : html`<button
+                      type="button"
+                      class="primary"
+                      @click=${this.publish}
+                      ?disabled=${this.busy}
+                    >
+                      Publicar
+                    </button>`
+              }
+              ${
+                album.status === 'draft' &&
+                Object.keys(album.photos).length === 0
+                  ? html`<button
+                      type="button"
+                      class="danger"
+                      @click=${this.deleteEmptyDraft}
+                      ?disabled=${this.busy}
+                    >
+                      Eliminar borrador
+                    </button>`
+                  : nothing
+              }
+            </div>
           </div>
-          <label class="button">
-            Agregar fotografías
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              multiple
-              hidden
-              @change=${this.uploadPhotos}
-              ?disabled=${this.busy}
-            />
-          </label>
-        </div>
-        ${
-          this.busy && this.uploadProgress > 0
-            ? html`<div>
-                <p role="status">${this.message}</p>
-                <progress max="1" .value=${this.uploadProgress}></progress>
-              </div>`
-            : ''
-        }
-        ${photos.map((photo, index) => this.renderPhotoEditor(photo, index))}
-      </section>
 
-      ${this.renderDuplicatePhotos(album)}
-      ${
-        photos.length
-          ? html`<section
-              class="order-editor"
-              aria-labelledby="photo-order-title"
-            >
-              <h2 id="photo-order-title">Ordenar fotos</h2>
+          <div class="field-grid">
+            ${this.albumInput('Título', 'title', album.title, true)}
+            <div>
+              ${this.albumInput('URL corta', 'slug', album.slug, true)}
               <p class="hint">
-                Arrastra una miniatura sobre otra para cambiar el orden. Guarda
-                el álbum para conservarlo.
+                «París y Versalles» se convierte en paris-y-versalles:
+                /album/paris-y-versalles. Puedes personalizarla; cambiar el
+                título de un álbum guardado no cambia su URL.
               </p>
-              <div class="order-grid">
-                ${photos.map((photo, index) => this.renderPhotoOrderItem(photo, index))}
+            </div>
+            ${this.albumInput('País', 'country', album.country)}
+            <div>
+              ${this.albumInput('Lugares del álbum', 'location', album.location)}
+              <p class="hint">
+                Resume los lugares del viaje, por ejemplo «París y Versalles».
+                Este texto no se asigna a las fotos; cada una tiene su propio
+                lugar.
+              </p>
+            </div>
+            ${this.albumInput('Fecha inicial', 'startDate', album.startDate, false, 'date')}
+            ${this.albumInput('Fecha final', 'endDate', album.endDate, false, 'date')}
+            ${this.renderCategorySelect(album.category)}
+            <label class="checkbox">
+              <input
+                type="checkbox"
+                .checked=${album.featured}
+                @change=${(event: Event) => {
+                  album.featured = (
+                    event.currentTarget as HTMLInputElement
+                  ).checked;
+                  this.requestUpdate();
+                }}
+              />
+              Viaje destacado
+            </label>
+          </div>
+          <label>
+            Relato del viaje
+            <textarea
+              name="description"
+              .value=${album.description}
+              @input=${this.updateAlbumField}
+            ></textarea>
+          </label>
+
+          <section class="photos-editor">
+            <div class="toolbar">
+              <div>
+                <h2>Fotografías</h2>
+                <p class="hint">
+                  Edita los datos de cada fotografía. El original permanece
+                  privado y sin modificaciones.
+                </p>
+                <p class="metadata-attribution">
+                  Las ubicaciones se resuelven con datos de OpenStreetMap.
+                </p>
               </div>
-            </section>`
-          : ''
-      }
-    </form>`;
+              <button
+                type="button"
+                @click=${this.openPhotoLibrary}
+                ?disabled=${this.busy}
+              >
+                Elegir fotos existentes
+              </button>
+              <label class="button">
+                Agregar fotografías
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  multiple
+                  hidden
+                  @change=${this.uploadPhotos}
+                  ?disabled=${this.busy}
+                />
+              </label>
+            </div>
+            ${
+              this.busy && this.uploadProgress > 0
+                ? html`<div>
+                    <p role="status">${this.message}</p>
+                    <progress max="1" .value=${this.uploadProgress}></progress>
+                  </div>`
+                : ''
+            }
+            ${photos.map((photo, index) => this.renderPhotoEditor(photo, index))}
+          </section>
+
+          ${this.renderDuplicatePhotos(album)}
+          ${
+            photos.length
+              ? html`<section
+                  class="order-editor"
+                  aria-labelledby="photo-order-title"
+                >
+                  <h2 id="photo-order-title">Ordenar fotos</h2>
+                  <p class="hint">
+                    Arrastra una miniatura sobre otra para cambiar el orden.
+                    Guarda el álbum para conservarlo.
+                  </p>
+                  <div class="order-grid">
+                    ${photos.map((photo, index) => this.renderPhotoOrderItem(photo, index))}
+                  </div>
+                </section>`
+              : ''
+          }
+        </fieldset>
+        ${this.renderPhotoLibrary()}
+      </form>`;
+  }
+
+  private readonly openPhotoLibrary = () => {
+    this.librarySelection = new Set();
+    this.librarySearch = '';
+    this.libraryOpen = true;
+    this.requestUpdate();
+  };
+
+  private readonly closePhotoLibrary = () => {
+    this.renderRoot.querySelector<HTMLDialogElement>('.photo-library')?.close();
+    this.libraryOpen = false;
+    this.requestUpdate();
+  };
+
+  private renderPhotoLibrary() {
+    if (!this.libraryOpen) return nothing;
+    const query = this.librarySearch.trim().toLocaleLowerCase();
+    const photos = this.libraryPhotos.filter(photo =>
+      photo.fileName.toLocaleLowerCase().includes(query),
+    );
+    return html`<dialog
+      class="photo-library"
+      aria-labelledby="library-title"
+      @cancel=${(event: Event) => {
+        event.preventDefault();
+        if (!this.busy) this.closePhotoLibrary();
+      }}
+    >
+      <div class="toolbar">
+        <h2 id="library-title">Elegir fotos existentes</h2>
+        <button
+          type="button"
+          @click=${this.closePhotoLibrary}
+          ?disabled=${this.busy}
+        >
+          Cerrar
+        </button>
+      </div>
+      <p class="hint">
+        Reutiliza tus fotografías sin volver a subirlas. Los datos y el crédito
+        se comparten entre álbumes.
+      </p>
+      ${this.error ? html`<p class="status error" role="alert">${this.error}</p>` : nothing}
+      <label
+        >Buscar por nombre
+        <input
+          type="search"
+          autofocus
+          .value=${this.librarySearch}
+          @input=${(event: Event) => {
+            this.librarySearch = (
+              event.currentTarget as HTMLInputElement
+            ).value;
+            this.requestUpdate();
+          }}
+        />
+      </label>
+      <div class="library-grid">
+        ${photos.map(photo => {
+          const included = Boolean(this.draft?.photos[photo.id]);
+          const deleting = this.deletingPhotoIds.includes(photo.id);
+          const albums = photoAlbums(photo.id, this.albums);
+          return html`<article class="library-card">
+            <label>
+              <img
+                src=${photo.urls.thumbnail}
+                alt=${photo.altText}
+                loading="lazy"
+              />
+              <span
+                ><input
+                  type="checkbox"
+                  .checked=${included || this.librarySelection.has(photo.id)}
+                  ?disabled=${included || deleting || this.busy}
+                  @change=${(event: Event) => {
+                    if ((event.currentTarget as HTMLInputElement).checked)
+                      this.librarySelection.add(photo.id);
+                    else this.librarySelection.delete(photo.id);
+                    this.requestUpdate();
+                  }}
+                />
+                ${photo.fileName}</span
+              >
+            </label>
+            <p class="hint">
+              ${included ? 'Ya incluida en este álbum. ' : ''}${deleting ? 'Eliminación pendiente. Reintenta para terminar.' : albums.length ? `En: ${albums.map(album => album.title || 'Sin título').join(', ')}` : 'Sin álbumes'}
+            </p>
+            ${
+              !included && !albums.length
+                ? html`<button
+                    type="button"
+                    class="danger"
+                    ?disabled=${this.busy}
+                    @click=${() => this.deleteLibraryPhoto(photo)}
+                  >
+                    ${deleting ? 'Reintentar eliminación' : 'Eliminar definitivamente'}
+                  </button>`
+                : nothing
+            }
+          </article>`;
+        })}
+      </div>
+      ${!photos.length ? html`<p class="hint">${query ? 'No hay fotografías con ese nombre.' : 'Todavía no hay fotografías disponibles.'}</p>` : nothing}
+      <div class="actions library-actions">
+        <span role="status">${this.librarySelection.size} seleccionadas</span>
+        <button
+          type="button"
+          class="primary"
+          ?disabled=${this.busy || !this.librarySelection.size}
+          @click=${this.addLibraryPhotos}
+        >
+          Agregar seleccionadas
+        </button>
+      </div>
+    </dialog>`;
+  }
+
+  private readonly addLibraryPhotos = async () => {
+    const album = this.validatedDraft(this.draft?.status === 'published');
+    if (!album) return;
+    await this.run(async () => {
+      this.draft = await this.repository.associatePhotos(
+        album,
+        [...this.librarySelection],
+        this.photoEdits(album),
+      );
+      this.rememberPhotos(this.draft);
+      this.closePhotoLibrary();
+    }, 'Fotografías agregadas sin volver a subir archivos.');
+  };
+
+  private async deleteLibraryPhoto(photo: SharedPhoto) {
+    if (
+      !window.confirm(
+        `¿Eliminar definitivamente ${photo.fileName}? Se borrarán el original y sus variantes. Esta acción no se puede deshacer.`,
+      )
+    )
+      return;
+    this.librarySelection.delete(photo.id);
+    await this.run(async () => {
+      await this.repository.deleteUnusedPhoto(photo.id);
+    }, 'Fotografía eliminada definitivamente.');
   }
 
   private renderDuplicatePhotos(album: Album) {
@@ -758,7 +1012,8 @@ export class AdminPage extends LitElement {
         <h2 id="duplicates-title">Duplicados detectados</h2>
         <p class="hint">
           Estas fotos comparten nombre base aunque su extensión sea distinta.
-          Elige cuál conservar; las demás se eliminarán.
+          Elige cuál conservar en este álbum; las demás seguirán disponibles
+          para reutilizarlas.
         </p>
       </div>
       ${duplicateGroups.map(
@@ -812,6 +1067,16 @@ export class AdminPage extends LitElement {
         }
       </div>
       <div class="photo-fields">
+        <p class="hint wide">
+          Aparece en:
+          ${
+            photoAlbums(photo.id, this.albums)
+              .map(album => album.title || 'Sin título')
+              .join(', ') || 'este álbum (sin guardar)'
+          }.
+          Los datos y el crédito son compartidos: al guardar cambian en todos
+          los álbumes publicados que muestran esta foto.
+        </p>
         ${this.photoInput(photo, 'Texto alternativo', 'altText', photo.altText, true)}
         ${this.photoInput(photo, 'Lugar', 'location', photo.location)}
         ${this.photoInput(photo, 'Fecha', 'takenAt', photo.takenAt, false, 'date')}
@@ -853,7 +1118,12 @@ export class AdminPage extends LitElement {
             type="checkbox"
             .checked=${photo.visible}
             @change=${(event: Event) => {
-              photo.visible = (event.currentTarget as HTMLInputElement).checked;
+              const input = event.currentTarget as HTMLInputElement;
+              if (!input.checked && !this.canRemovePhotos([photo.id])) {
+                input.checked = true;
+                return;
+              }
+              photo.visible = input.checked;
               this.requestUpdate();
             }}
           />
@@ -872,6 +1142,16 @@ export class AdminPage extends LitElement {
           Usar como portada
         </label>
         <div class="photo-actions wide">
+          <label class="button">
+            Reemplazar archivo
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              hidden
+              @change=${(event: Event) => this.replacePhoto(photo, event)}
+              ?disabled=${this.busy}
+            />
+          </label>
           <button
             type="button"
             @click=${() => this.regeneratePhoto(photo)}
@@ -889,7 +1169,7 @@ export class AdminPage extends LitElement {
             @click=${() => this.deletePhoto(photo)}
             ?disabled=${this.busy}
           >
-            Eliminar foto
+            Quitar del álbum
           </button>
         </div>
         ${
@@ -1003,6 +1283,26 @@ export class AdminPage extends LitElement {
   }
 
   private subscribePrivateData() {
+    this.libraryWritable = false;
+    this.unsubscribePhotos = this.repository.subscribePrivatePhotos(
+      (photos, deleting, writable) => {
+        if (this.draft) {
+          for (const photo of photos) {
+            const current = this.draft.photos[photo.id];
+            const baseline = this.photoBaseline[photo.id];
+            if (current && baseline && samePhoto(current, baseline)) {
+              Object.assign(current, sharedPhoto(photo));
+              this.photoBaseline[photo.id] = sharedPhoto(photo);
+            }
+          }
+        }
+        this.libraryPhotos = photos;
+        this.deletingPhotoIds = deleting;
+        this.libraryWritable = writable;
+        this.requestUpdate();
+      },
+      error => this.setError(error),
+    );
     this.unsubscribeAlbums = this.repository.subscribePrivateAlbums(
       albums => {
         this.albums = albums;
@@ -1050,6 +1350,7 @@ export class AdminPage extends LitElement {
 
   private readonly createAlbum = () => {
     this.draft = createDraftAlbum();
+    this.photoBaseline = {};
     this.slugAutomatic = true;
     this.clearMessages();
     this.requestUpdate();
@@ -1057,6 +1358,7 @@ export class AdminPage extends LitElement {
 
   private selectAlbum(album: Album) {
     this.draft = structuredClone(album);
+    this.rememberPhotos(album);
     this.slugAutomatic = false;
     this.clearMessages();
     this.requestUpdate();
@@ -1159,12 +1461,13 @@ export class AdminPage extends LitElement {
     if (!album) return;
     await this.run(
       async () => {
-        if (isPublished) {
-          await this.repository.publishAlbum(album, this.albums);
-        } else {
-          await this.repository.saveAlbum(album);
-        }
-        if (this.draft?.id === album.id) this.slugAutomatic = false;
+        const edits = this.photoEdits(album);
+        const saved = isPublished
+          ? await this.repository.publishAlbum(album, this.albums, edits)
+          : await this.repository.saveAlbum(album, edits);
+        this.draft = saved;
+        this.rememberPhotos(saved);
+        this.slugAutomatic = false;
       },
       isPublished ? 'Cambios publicados.' : successMessage,
     );
@@ -1174,19 +1477,26 @@ export class AdminPage extends LitElement {
     const album = this.validatedDraft(true);
     if (!album) return;
     await this.run(async () => {
-      const published = await this.repository.publishAlbum(album, this.albums);
-      album.status = published.status;
-      album.updatedAt = published.updatedAt;
-      album.publishedAt = published.publishedAt;
-      if (this.draft?.id === album.id) this.slugAutomatic = false;
+      const published = await this.repository.publishAlbum(
+        album,
+        this.albums,
+        this.photoEdits(album),
+      );
+      this.draft = published;
+      this.rememberPhotos(published);
+      this.slugAutomatic = false;
     }, 'Álbum publicado.');
   };
 
   private readonly unpublish = async () => {
-    if (!this.draft) return;
+    const album = this.draft;
+    if (!album) return;
     await this.run(async () => {
-      await this.repository.unpublishAlbum(this.draft as Album);
-      if (this.draft) this.draft.status = 'draft';
+      this.draft = await this.repository.unpublishAlbum(
+        album,
+        this.photoEdits(album),
+      );
+      this.rememberPhotos(this.draft);
     }, 'Álbum retirado de la galería pública.');
   };
 
@@ -1255,144 +1565,136 @@ export class AdminPage extends LitElement {
     const input = event.currentTarget as HTMLInputElement;
     const files = [...(input.files ?? [])];
     input.value = '';
-    if (!this.draft || files.length === 0) return;
-    if (this.draft.status === 'published' && !this.validatedDraft(true)) return;
-    this.busy = true;
-    this.error = '';
-    try {
-      const replacedPaths: string[][] = [];
-      let replacements = 0;
-      for (let index = 0; index < files.length; index += 1) {
-        const file = files[index];
-        if (!file) continue;
-        const matchingPhotos: GalleryPhoto[] = Object.values(
-          this.draft.photos,
-        ).filter(
-          photo => photoFileKey(photo.fileName) === photoFileKey(file.name),
-        );
-        const existing: GalleryPhoto | undefined =
-          matchingPhotos.find(photo => photo.fileName === file.name) ??
-          matchingPhotos[0];
-        const duplicates = matchingPhotos.filter(
-          photo => photo.id !== existing?.id,
-        );
-        const photoId = existing?.id ?? crypto.randomUUID();
-        this.message = `Leyendo metadatos ${index + 1} de ${files.length}: ${file.name}`;
-        this.uploadProgress = index / files.length;
-        this.requestUpdate();
-        const metadata = await this.metadataReader.read(file);
-        this.message = `Procesando ${index + 1} de ${files.length}: ${file.name}`;
-        this.requestUpdate();
-        const result = await this.processor.process(
-          file,
-          this.site.creditText,
-          structuredClone(existing?.credit ?? this.site.defaultCredit),
-        );
-        const originalPath = await this.repository.uploadOriginal(
-          this.draft.id,
-          photoId,
-          file,
-          progress => {
-            this.uploadProgress = (index + progress * 0.35) / files.length;
-            this.requestUpdate();
-          },
-        );
-        const uploaded = await this.repository.uploadVariants(
-          this.draft.id,
-          photoId,
-          result.variants,
-          progress => {
-            this.uploadProgress =
-              (index + 0.35 + progress * 0.65) / files.length;
-            this.requestUpdate();
-          },
-        );
-        const fallbackAlt = file.name
-          .replace(/\.[^.]+$/, '')
-          .replace(/[-_]+/g, ' ');
-        const photo: GalleryPhoto = {
-          ...existing,
-          id: photoId,
-          albumId: this.draft.id,
-          fileName: file.name,
-          width: result.originalWidth,
-          height: result.originalHeight,
-          caption: existing?.caption ?? '',
-          location: existing?.location ?? metadata.location ?? '',
-          takenAt:
-            existing?.takenAt ?? metadata.takenAt ?? this.draft.startDate,
-          altText: existing?.altText ?? fallbackAlt,
-          visible: existing?.visible ?? true,
-          originalPath,
-          publicPaths: uploaded.paths,
-          urls: uploaded.urls,
-          credit: result.credit,
-        };
-        this.draft.photos[photoId] = photo;
-        if (existing) {
-          replacements += 1;
-          const activePaths = new Set<string>([
+    const album = this.validatedDraft(this.draft?.status === 'published');
+    if (!album || files.length === 0) return;
+    const next = structuredClone(album);
+    const edits = this.photoEdits(album);
+    await this.run(
+      async () => {
+        for (let index = 0; index < files.length; index += 1) {
+          const file = files[index]!;
+          const photoId = crypto.randomUUID();
+          this.message = `Procesando ${index + 1} de ${files.length}: ${file.name}`;
+          this.requestUpdate();
+          const metadata = await this.metadataReader.read(file);
+          const result = await this.processor.process(
+            file,
+            this.site.creditText,
+            structuredClone(this.site.defaultCredit),
+          );
+          const originalPath = await this.repository.uploadOriginal(
+            'photos',
+            photoId,
+            file,
+            progress => {
+              this.uploadProgress = (index + progress * 0.35) / files.length;
+              this.requestUpdate();
+            },
+          );
+          const uploaded = await this.repository.uploadVariants(
+            'photos',
+            photoId,
+            result.variants,
+            progress => {
+              this.uploadProgress =
+                (index + 0.35 + progress * 0.65) / files.length;
+              this.requestUpdate();
+            },
+          );
+          next.photos[photoId] = {
+            id: photoId,
+            albumId: album.id,
+            fileName: file.name,
+            width: result.originalWidth,
+            height: result.originalHeight,
+            caption: '',
+            location: metadata.location ?? '',
+            takenAt: metadata.takenAt ?? album.startDate,
+            altText: file.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' '),
+            visible: true,
             originalPath,
-            ...uploaded.paths,
-          ]);
-          replacedPaths.push(
-            [
-              existing.originalPath,
-              ...existing.publicPaths,
-              ...duplicates.flatMap(duplicate => [
-                duplicate.originalPath,
-                ...duplicate.publicPaths,
-              ]),
-            ].filter(
-              (path): path is string =>
-                path !== undefined && !activePaths.has(path),
-            ),
-          );
-          for (const duplicate of duplicates) {
-            delete this.draft.photos[duplicate.id];
-          }
-          this.draft.photoOrder = this.draft.photoOrder.filter(
-            id => !duplicates.some(duplicate => duplicate.id === id),
-          );
-          if (duplicates.some(photo => photo.id === this.draft?.coverPhotoId)) {
-            this.draft.coverPhotoId = photoId;
-          }
-        } else {
-          this.draft.photoOrder.push(photoId);
+            publicPaths: uploaded.paths,
+            urls: uploaded.urls,
+            credit: result.credit,
+          };
+          next.photoOrder.push(photoId);
+          next.coverPhotoId ??= photoId;
         }
-        this.draft.coverPhotoId ??= photoId;
-      }
-      if (this.draft.status === 'published') {
-        await this.repository.publishAlbum(this.draft, this.albums);
-      } else {
-        await this.repository.saveAlbum(this.draft);
-      }
-      this.slugAutomatic = false;
-      await Promise.all(
-        replacedPaths.map(paths => this.repository.deletePaths(paths)),
-      );
-      const additions = files.length - replacements;
-      this.message = [
-        additions
-          ? `${additions} fotografía${additions === 1 ? '' : 's'} agregada${additions === 1 ? '' : 's'}.`
-          : '',
-        replacements
-          ? `${replacements} fotografía${replacements === 1 ? '' : 's'} reemplazada${replacements === 1 ? '' : 's'}.`
-          : '',
-      ]
-        .filter(Boolean)
-        .join(' ');
-      this.uploadProgress = 0;
-    } catch (error) {
-      this.setError(error);
-    } finally {
-      this.busy = false;
-      this.requestUpdate();
-    }
+        const newEdits: PhotoEdit[] = next.photoOrder
+          .filter(id => !album.photos[id])
+          .map(id => ({ photo: sharedPhoto(next.photos[id]!) }));
+        const changes = [...edits, ...newEdits];
+        const saved =
+          next.status === 'published'
+            ? await this.repository.publishAlbum(next, this.albums, changes)
+            : await this.repository.saveAlbum(next, changes);
+        this.draft = saved;
+        this.rememberPhotos(saved);
+        this.slugAutomatic = false;
+        this.uploadProgress = 0;
+      },
+      `${files.length} fotografía${files.length === 1 ? '' : 's'} agregada${files.length === 1 ? '' : 's'}.`,
+    );
   };
+
+  private async replacePhoto(photo: GalleryPhoto, event: Event) {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (
+      !file ||
+      !window.confirm(
+        `¿Reemplazar ${photo.fileName}? La imagen cambiará en todos los álbumes que la usan.`,
+      )
+    )
+      return;
+    const previous = this.previousPhoto(photo);
+    await this.run(async () => {
+      const result = await this.processor.process(
+        file,
+        this.site.creditText,
+        structuredClone(photo.credit),
+      );
+      const originalPath = await this.repository.uploadOriginal(
+        'photos',
+        photo.id,
+        file,
+        () => undefined,
+      );
+      const uploaded = await this.repository.uploadVariants(
+        'photos',
+        photo.id,
+        result.variants,
+        () => undefined,
+      );
+      const replacement = {
+        ...sharedPhoto(photo),
+        fileName: file.name,
+        width: result.originalWidth,
+        height: result.originalHeight,
+        originalPath,
+        publicPaths: uploaded.paths,
+        urls: uploaded.urls,
+        credit: result.credit,
+      };
+      await this.repository.savePhoto(replacement, previous);
+      Object.assign(photo, replacement);
+      this.photoBaseline[photo.id] = sharedPhoto(replacement);
+      await this.repository.deletePaths(
+        [previous.originalPath, ...previous.publicPaths].filter(
+          (path): path is string =>
+            Boolean(path) &&
+            path !== originalPath &&
+            !uploaded.paths.includes(path!),
+        ),
+      );
+    }, 'Fotografía reemplazada en todos sus álbumes.');
+  }
 
   private async regeneratePhoto(photo: GalleryPhoto) {
     if (!this.draft) return;
+    const previous = sharedPhoto(this.previousPhoto(photo));
+    const snapshot = structuredClone(photo);
     this.busy = true;
     this.clearMessages();
     this.photoFeedbackId = photo.id;
@@ -1402,15 +1704,15 @@ export class AdminPage extends LitElement {
     this.uploadProgress = 0;
     this.requestUpdate();
     try {
-      const original = await this.repository.getOriginalFile(photo);
+      const original = await this.repository.getOriginalFile(snapshot);
       const result = await this.processor.process(
         original,
         this.site.creditText,
-        photo.credit,
+        snapshot.credit,
       );
-      const previousPaths = [...photo.publicPaths];
+      const previousPaths = [...snapshot.publicPaths];
       const uploaded = await this.repository.uploadVariants(
-        this.draft?.id ?? photo.albumId,
+        'photos',
         photo.id,
         result.variants,
         progress => {
@@ -1418,19 +1720,18 @@ export class AdminPage extends LitElement {
           this.requestUpdate();
         },
       );
-      photo.credit = result.credit;
-      photo.urls = uploaded.urls;
-      photo.publicPaths = uploaded.paths;
-      if (this.draft.status === 'published') {
-        await this.repository.publishAlbum(this.draft, this.albums);
-      } else {
-        await this.repository.saveAlbum(this.draft);
-      }
+      const regenerated = {
+        ...sharedPhoto(snapshot),
+        credit: result.credit,
+        urls: uploaded.urls,
+        publicPaths: uploaded.paths,
+      };
+      await this.repository.savePhoto(regenerated, previous);
+      Object.assign(photo, regenerated);
+      this.photoBaseline[photo.id] = sharedPhoto(regenerated);
       await this.repository.deletePaths(previousPaths);
       this.photoFeedbackMessage =
-        this.draft.status === 'published'
-          ? 'Crédito regenerado y publicado.'
-          : 'Crédito regenerado y listo para revisión.';
+        'Crédito regenerado en todos los álbumes que muestran la fotografía.';
     } catch (error) {
       this.photoFeedbackMessage = '';
       this.photoFeedbackError =
@@ -1453,55 +1754,91 @@ export class AdminPage extends LitElement {
     if (!this.draft) return;
     const duplicates = group.filter(photo => photo.id !== kept.id);
     if (duplicates.length === 0) return;
-    const confirmed = window.confirm(
-      `¿Conservar ${kept.fileName} y eliminar ${duplicates
-        .map(photo => photo.fileName)
-        .join(', ')}? Esta acción borrará sus originales y variantes.`,
-    );
-    if (!confirmed) return;
+    if (!this.canRemovePhotos(duplicates.map(photo => photo.id))) return;
+    if (
+      !window.confirm(
+        `¿Conservar ${kept.fileName} y quitar las otras ${duplicates.length} fotos de este álbum? Sus archivos se conservarán.`,
+      )
+    )
+      return;
+    const album = structuredClone(this.draft);
+    if (duplicates.some(photo => photo.id === album.coverPhotoId))
+      album.coverPhotoId = kept.id;
     await this.run(async () => {
-      if (!this.draft) return;
-      for (const duplicate of duplicates) {
-        delete this.draft.photos[duplicate.id];
-      }
-      this.draft.photoOrder = this.draft.photoOrder.filter(
-        id => !duplicates.some(duplicate => duplicate.id === id),
+      this.draft = await this.repository.removeAlbumPhotos(
+        album,
+        duplicates.map(photo => photo.id),
+        this.photoEdits(album),
       );
-      if (duplicates.some(photo => photo.id === this.draft?.coverPhotoId)) {
-        this.draft.coverPhotoId = kept.id;
-      }
-      if (this.draft.status === 'published') {
-        await this.repository.publishAlbum(this.draft, this.albums);
-      } else {
-        await this.repository.saveAlbum(this.draft);
-      }
-      await Promise.all(
-        duplicates.map(photo => this.repository.deletePhotoFiles(photo)),
-      );
-    }, `Se conservó ${kept.fileName} y se eliminaron los duplicados.`);
+      this.rememberPhotos(this.draft);
+    }, `Se conservó ${kept.fileName} en este álbum.`);
   }
 
   private async deletePhoto(photo: GalleryPhoto) {
-    if (!this.draft) return;
-    const confirmed = window.confirm(
-      `¿Eliminar ${photo.fileName}? También se borrará su original privado.`,
-    );
-    if (!confirmed) return;
+    if (!this.draft || !this.canRemovePhotos([photo.id])) return;
+    if (
+      !window.confirm(
+        `¿Quitar ${photo.fileName} de este álbum? Podrás volver a elegirla y seguirá en los demás álbumes.`,
+      )
+    )
+      return;
+    const album = this.draft;
     await this.run(async () => {
-      if (!this.draft) return;
-      delete this.draft.photos[photo.id];
-      this.draft.photoOrder = this.draft.photoOrder.filter(
-        id => id !== photo.id,
+      this.draft = await this.repository.removeAlbumPhotos(
+        album,
+        [photo.id],
+        this.photoEdits(album),
       );
-      if (this.draft.coverPhotoId === photo.id)
-        this.draft.coverPhotoId = this.draft.photoOrder[0] ?? null;
-      if (this.draft.status === 'published') {
-        await this.repository.publishAlbum(this.draft, this.albums);
-      } else {
-        await this.repository.saveAlbum(this.draft);
-      }
-      await this.repository.deletePhotoFiles(photo);
-    }, 'Fotografía eliminada.');
+      this.rememberPhotos(this.draft);
+    }, 'Fotografía quitada del álbum.');
+  }
+
+  private canRemovePhotos(ids: readonly string[]): boolean {
+    if (
+      this.draft?.status === 'published' &&
+      !orderedPhotos(this.draft).some(
+        photo => photo.visible && !ids.includes(photo.id),
+      )
+    ) {
+      this.setError(
+        new Error(
+          'Retira el álbum de publicación antes de quitar u ocultar su última fotografía visible.',
+        ),
+      );
+      return false;
+    }
+    return true;
+  }
+
+  private previousPhoto(photo: SharedPhoto): SharedPhoto {
+    return (
+      this.photoBaseline[photo.id] ??
+      this.libraryPhotos.find(item => item.id === photo.id) ??
+      sharedPhoto(photo)
+    );
+  }
+
+  private photoEdits(album: Album): PhotoEdit[] {
+    return Object.values(album.photos).flatMap(photo => {
+      const previous =
+        this.photoBaseline[photo.id] ??
+        this.libraryPhotos.find(item => item.id === photo.id) ??
+        this.albums.find(item => item.photos[photo.id])?.photos[photo.id];
+      return !previous || !samePhoto(photo, previous)
+        ? [
+            {
+              photo: sharedPhoto(photo),
+              ...(previous ? { previous: sharedPhoto(previous) } : {}),
+            },
+          ]
+        : [];
+    });
+  }
+
+  private rememberPhotos(album: Album) {
+    this.photoBaseline = Object.fromEntries(
+      Object.values(album.photos).map(photo => [photo.id, sharedPhoto(photo)]),
+    );
   }
 
   private startPhotoDrag(event: DragEvent, photoId: string) {

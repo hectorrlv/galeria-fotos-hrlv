@@ -5,15 +5,35 @@
       ".write": "auth != null && auth.uid === 'tt6Vtlpd7rfbX8F9ZSj2yqTyJTV2'",
       "albums": {
         "$albumId": {
-          ".validate": "newData.val() == null || (newData.hasChildren(['id', 'slug', 'title', 'status', 'photos', 'photoOrder']) && newData.child('id').val() === $albumId && newData.child('status').val() === 'published')"
+          ".validate": "newData.val() == null || (newData.hasChildren(['id', 'slug', 'title', 'status', 'photos', 'photoOrder']) && newData.child('id').val() === $albumId && newData.child('status').val() === 'published')",
+          "photos": {
+            "$photoId": {
+              ".validate": "!newData.hasChild('originalPath')"
+            }
+          }
         }
       }
     },
     "private": {
       ".read": "auth != null && auth.uid === 'tt6Vtlpd7rfbX8F9ZSj2yqTyJTV2'",
-      ".write": "auth != null && auth.uid === 'tt6Vtlpd7rfbX8F9ZSj2yqTyJTV2'"
+      ".write": "auth != null && auth.uid === 'tt6Vtlpd7rfbX8F9ZSj2yqTyJTV2'",
+      "albums": {
+        "$albumId": {
+          ".validate": "newData.val() == null || newData.parent().parent().child('schemaVersion').val() !== 2 || (!newData.hasChild('photos') && newData.child('id').val() === $albumId)",
+          "photoRefs": {
+            "$photoId": {
+              ".validate": "newData.hasChild('visible') && newData.child('visible').isBoolean() && newData.parent().parent().parent().parent().child('photos').child($photoId).exists()"
+            }
+          }
+        }
+      },
+      "photos": {
+        "$photoId": {
+          ".validate": "newData.val() == null || (newData.child('id').val() === $photoId && !newData.hasChild('albumId') && !newData.hasChild('visible'))"
+        }
+      }
     },
-    ".read": false,
-    ".write": false
+    ".read": "auth != null && auth.uid === 'tt6Vtlpd7rfbX8F9ZSj2yqTyJTV2'",
+    ".write": "auth != null && auth.uid === 'tt6Vtlpd7rfbX8F9ZSj2yqTyJTV2'"
   }
 }
