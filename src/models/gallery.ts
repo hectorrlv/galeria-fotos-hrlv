@@ -32,9 +32,8 @@ export interface PhotoVariantUrls {
   viewer: string;
 }
 
-export interface GalleryPhoto {
+export interface SharedPhoto {
   id: string;
-  albumId: string;
   fileName: string;
   width: number;
   height: number;
@@ -42,12 +41,29 @@ export interface GalleryPhoto {
   location: string;
   takenAt: string;
   altText: string;
-  visible: boolean;
   originalPath?: string;
   publicPaths: string[];
   urls: PhotoVariantUrls;
   credit: PhotoCredit;
 }
+
+export interface AlbumPhotoReference {
+  visible: boolean;
+}
+
+/** Resolved photo used by the editor and public gallery, never stored privately. */
+export interface GalleryPhoto extends SharedPhoto, AlbumPhotoReference {
+  albumId: string;
+}
+
+export interface PhotoEdit {
+  photo: SharedPhoto;
+  previous?: SharedPhoto;
+}
+
+export type StoredAlbum = Omit<Album, 'photos'> & {
+  photoRefs?: Record<string, AlbumPhotoReference>;
+};
 
 export interface Album {
   id: string;

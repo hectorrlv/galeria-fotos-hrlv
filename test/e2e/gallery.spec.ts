@@ -477,9 +477,9 @@ test('reorders all album photos from the compact mosaic', async ({ page }) => {
     const order = [...root.querySelectorAll<HTMLElement>('.order-photo')].map(
       element => element.getAttribute('aria-label'),
     );
-    const cards = [...root.querySelectorAll('.photo-card .hint')].map(
-      element => element.textContent,
-    );
+    const cards = [
+      ...root.querySelectorAll('.photo-card > div:first-child > .hint'),
+    ].map(element => element.textContent);
     admin.remove();
     return { photoOrder: album.photoOrder, order, cards };
   });
@@ -536,7 +536,7 @@ test('keeps album and photo date inputs inside the mobile editor', async ({
   }
 });
 
-test('replaces a photo with the same base name without changing its metadata or order', async ({
+test('explicitly replaces a shared photo without changing its metadata or album order', async ({
   page,
 }) => {
   await page.goto('/');
@@ -643,11 +643,14 @@ test('replaces a photo with the same base name without changing its metadata or 
           viewer: 'new-viewer',
         },
       }),
-      publishAlbum: async () => calls.push('publish'),
+      savePhoto: async () => calls.push('publish'),
       deletePaths: async (paths: string[]) =>
         calls.push(`delete:${paths.join(',')}`),
     };
-    await (admin['uploadPhotos'] as (event: Event) => Promise<void>)({
+    window.confirm = () => true;
+    await (
+      admin['replacePhoto'] as (photo: unknown, event: Event) => Promise<void>
+    )(photo, {
       currentTarget: {
         files: [new File(['replacement'], 'photo.jpg')],
         value: '',
@@ -751,9 +754,15 @@ test('shows detected duplicates and safely keeps the selected photo', async ({
     admin['draft'] = album;
     admin['albums'] = [album];
     admin['repository'] = {
-      publishAlbum: async () => calls.push('publish'),
-      deletePhotoFiles: async (photo: typeof jpeg) =>
-        calls.push(`delete:${photo.id}`),
+      removeAlbumPhotos: async (value: typeof album, ids: string[]) => {
+        calls.push(`remove:${ids.join(',')}`);
+        const next = structuredClone(value);
+        for (const id of ids)
+          delete (next.photos as Record<string, unknown>)[id];
+        next.photoOrder = next.photoOrder.filter(id => !ids.includes(id));
+        next.coverPhotoId = next.photoOrder[0]!;
+        return next;
+      },
     };
     admin['testCalls'] = calls;
     admin['render'] = () =>
@@ -769,8 +778,10 @@ test('shows detected duplicates and safely keeps the selected photo', async ({
   await expect(
     admin.getByRole('heading', { name: 'Duplicados detectados' }),
   ).toBeVisible();
-  await expect(admin.getByText('atardecer.jpg')).toBeVisible();
-  await expect(admin.getByText('atardecer.jpeg')).toBeVisible();
+  await expect(admin.getByText('atardecer.jpg', { exact: true })).toBeVisible();
+  await expect(
+    admin.getByText('atardecer.jpeg', { exact: true }),
+  ).toBeVisible();
 
   await admin.evaluate(async element => {
     const component = element as HTMLElement & Record<string, unknown>;
@@ -800,7 +811,7 @@ test('shows detected duplicates and safely keeps the selected photo', async ({
           (element as HTMLElement & Record<string, unknown>)['testCalls'],
       ),
     )
-    .toEqual(['publish', 'delete:jpeg']);
+    .toEqual(['remove:jpeg']);
 });
 
 test('publishes regenerated credit before deleting its old variants', async ({
@@ -884,7 +895,7 @@ test('publishes regenerated credit before deleting its old variants', async ({
       saveAlbum: async () => {
         calls.push('private');
       },
-      publishAlbum: async () => {
+      savePhoto: async () => {
         calls.push('public');
       },
       deletePaths: async () => {
@@ -915,7 +926,9 @@ test('publishes regenerated credit before deleting its old variants', async ({
   ).toBeVisible();
   await admin.getByRole('button', { name: 'Regenerar crédito' }).click();
   await expect(
-    admin.getByText('Crédito regenerado y publicado.'),
+    admin.getByText(
+      'Crédito regenerado en todos los álbumes que muestran la fotografía.',
+    ),
   ).toBeVisible();
   await expect
     .poll(() =>
@@ -927,7 +940,7 @@ test('publishes regenerated credit before deleting its old variants', async ({
     .toEqual(['public', 'delete-old-variants']);
 });
 
-test('publishes an album update before deleting a published photo file', async ({
+test('blocks removing the last visible photo from a published album', async ({
   page,
 }) => {
   await page.goto('/');
@@ -1001,5 +1014,5 @@ test('publishes an album update before deleting a published photo file', async (
     return events;
   });
 
-  expect(calls).toEqual(['public:', 'delete-files']);
+  expect(calls).toEqual([]);
 });

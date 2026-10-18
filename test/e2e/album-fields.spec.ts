@@ -44,7 +44,10 @@ const mountAdmin = async (page: Page, albums: Album[] = []) => {
     admin['testCalls'] = calls;
     admin['albums'] = values;
     admin['repository'] = {
-      saveAlbum: async (album: unknown) => calls.push(structuredClone(album)),
+      saveAlbum: async (album: unknown) => {
+        calls.push(structuredClone(album));
+        return structuredClone(album);
+      },
     };
     admin['render'] = () => [
       (admin['renderMessages'] as () => unknown).call(admin),
@@ -274,7 +277,7 @@ test('allows custom slugs, normalizes them on blur and rejects duplicates on sav
   await expect(slug).toHaveValue('url-unica');
 });
 
-test('leaves new photo locations empty without coordinates and preserves existing locations on replacement', async ({
+test('leaves locations empty without coordinates and treats equal filenames as new photos', async ({
   page,
 }) => {
   const admin = await mountAdmin(page);
@@ -309,7 +312,7 @@ test('leaves new photo locations empty without coordinates and preserves existin
         paths: [],
         urls: { thumbnail: '', grid: '', viewer: '' },
       }),
-      saveAlbum: async () => undefined,
+      saveAlbum: async (value: Album) => structuredClone(value),
       deletePaths: async () => undefined,
     };
     const upload = async (...names: string[]) =>
@@ -334,11 +337,23 @@ test('leaves new photo locations empty without coordinates and preserves existin
     );
     if (gps) gps.location = 'Lugar escrito a mano';
     await upload('plain.jpg', 'gps.jpg');
-    return { added, replaced: byName(), albumLocation: album.location };
+    const uploaded = component['draft'] as Album;
+    const newGps = Object.values(uploaded.photos).find(
+      photo => photo.fileName === 'gps.jpg' && photo.id !== gps?.id,
+    );
+    return {
+      added,
+      originalLocation: uploaded.photos[gps!.id]!.location,
+      newLocation: newGps?.location,
+      count: Object.keys(uploaded.photos).length,
+      albumLocation: album.location,
+    };
   });
   expect(result).toEqual({
     added: { 'plain.jpg': '', 'gps.jpg': 'Versalles, Francia' },
-    replaced: { 'plain.jpg': '', 'gps.jpg': 'Lugar escrito a mano' },
+    originalLocation: 'Lugar escrito a mano',
+    newLocation: 'Versalles, Francia',
+    count: 4,
     albumLocation: 'París y Versalles',
   });
 });
