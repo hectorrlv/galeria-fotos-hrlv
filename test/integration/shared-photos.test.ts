@@ -149,6 +149,83 @@ test('transactions associate, update all public appearances and remove reference
   assert.equal(final.private.albums.b.photoRefs, undefined);
 });
 
+test('withdrawing an album saves pending shared edits and updates its other published appearances atomically', async () => {
+  const draft = {
+    ...createDraftAlbum(2),
+    id: 'b',
+    slug: 'b',
+    title: 'b',
+    description: 'Publicado',
+  };
+  const associated = await repo.associatePhotos(draft, ['p']);
+  await repo.publishAlbum(associated, []);
+  await set(
+    ref(database, 'private/albums/b/description'),
+    'Pendiente de publicar',
+  );
+  const edited = album('a');
+  Object.assign(edited.photos.p!, {
+    caption: 'Pie editado antes de retirar',
+    location: 'Francia',
+    altText: 'El Sena en París',
+    credit: { ...DEFAULT_CREDIT, color: 'dark' },
+  });
+  edited.description = 'Relato editado antes de retirar';
+  const withdrawn = await repo.unpublishAlbum(edited, [
+    {
+      photo: sharedPhoto(edited.photos.p!),
+      previous: sharedPhoto(p),
+    },
+  ]);
+  const saved = (await get(ref(database))).val();
+  assert.equal(saved.public.albums.a, undefined);
+  assert.equal(saved.private.albums.a.status, 'draft');
+  assert.equal(saved.private.albums.a.description, edited.description);
+  assert.deepEqual(saved.private.photos.p, sharedPhoto(edited.photos.p!));
+  assert.equal(
+    saved.public.albums.b.photos.p.caption,
+    edited.photos.p!.caption,
+  );
+  assert.equal(
+    saved.public.albums.b.photos.p.location,
+    edited.photos.p!.location,
+  );
+  assert.equal(
+    saved.public.albums.b.photos.p.altText,
+    edited.photos.p!.altText,
+  );
+  assert.equal(saved.public.albums.b.photos.p.credit.color, 'dark');
+  assert.equal(saved.public.albums.b.photos.p.originalPath, undefined);
+  assert.equal(saved.public.albums.b.description, 'Publicado');
+  assert.equal(withdrawn.status, 'draft');
+  assert.deepEqual(
+    sharedPhoto(withdrawn.photos.p!),
+    sharedPhoto(edited.photos.p!),
+  );
+});
+
+test('a stale shared-photo edit cannot partially withdraw the album', async () => {
+  await repo.savePhoto(
+    { ...sharedPhoto(p), caption: 'Editado en otra sesión' },
+    sharedPhoto(p),
+  );
+  await assert.rejects(
+    repo.unpublishAlbum(album('a'), [
+      {
+        photo: { ...sharedPhoto(p), caption: 'Edición desactualizada' },
+        previous: sharedPhoto(p),
+      },
+    ]),
+    /otra sesión/,
+  );
+  const saved = (await get(ref(database))).val();
+  assert.equal(saved.private.albums.a.status, 'published');
+  assert.equal(
+    saved.public.albums.a.photos.p.caption,
+    'Editado en otra sesión',
+  );
+});
+
 test('root reads and writes are admin only, public remains readable and private paths cannot leak', async () => {
   for (const db of [databases[1]!, databases[2]!]) {
     await assert.rejects(get(ref(db)), /Permission denied/);

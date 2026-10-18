@@ -1489,10 +1489,14 @@ export class AdminPage extends LitElement {
   };
 
   private readonly unpublish = async () => {
-    if (!this.draft) return;
+    const album = this.draft;
+    if (!album) return;
     await this.run(async () => {
-      await this.repository.unpublishAlbum(this.draft as Album);
-      if (this.draft) this.draft.status = 'draft';
+      this.draft = await this.repository.unpublishAlbum(
+        album,
+        this.photoEdits(album),
+      );
+      this.rememberPhotos(this.draft);
     }, 'Álbum retirado de la galería pública.');
   };
 
@@ -1757,7 +1761,9 @@ export class AdminPage extends LitElement {
       )
     )
       return;
-    const album = this.draft;
+    const album = structuredClone(this.draft);
+    if (duplicates.some(photo => photo.id === album.coverPhotoId))
+      album.coverPhotoId = kept.id;
     await this.run(async () => {
       this.draft = await this.repository.removeAlbumPhotos(
         album,

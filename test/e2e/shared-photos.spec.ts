@@ -4,6 +4,7 @@ import {
   DEFAULT_CREDIT,
   type Album,
   type GalleryPhoto,
+  type PhotoEdit,
   type SharedPhoto,
 } from '../../src/models/gallery.js';
 
@@ -116,6 +117,15 @@ const mount = async (page: Page, published = false) => {
           calls.push(`save:${edits.length}`);
           component['testEdits'] = edits;
           return structuredClone(_value);
+        },
+        unpublishAlbum: async (value: Album, edits: PhotoEdit[]) => {
+          calls.push('unpublish');
+          if (component['rejectUnpublish'])
+            throw new Error('No se pudo retirar el álbum.');
+          component['testEdits'] = structuredClone(edits);
+          const next = { ...structuredClone(value), status: 'draft' as const };
+          refresh(next);
+          return next;
         },
         savePhoto: async () => {
           calls.push('save-photo');
@@ -264,6 +274,66 @@ test('saves shared metadata from a draft and explains which albums are affected'
       previous: { caption: 'Junto al Sena' },
     },
   ]);
+});
+
+test('withdrawing preserves unsaved shared metadata and resets the edit baseline', async ({
+  page,
+}) => {
+  const admin = await mount(page, true);
+  await admin.getByLabel('Pie de foto', { exact: true }).fill('Pie al retirar');
+  await admin.getByLabel('Lugar', { exact: true }).fill('Francia');
+  await admin.getByLabel('Texto alternativo', { exact: true }).fill('El Sena');
+  await admin
+    .getByRole('combobox', { name: 'Color', exact: true })
+    .selectOption('dark');
+  await admin.getByRole('button', { name: 'Retirar', exact: true }).click();
+  await expect(
+    admin.getByRole('button', { name: 'Guardar borrador' }),
+  ).toBeVisible();
+  await expect(admin.getByLabel('Pie de foto', { exact: true })).toHaveValue(
+    'Pie al retirar',
+  );
+  const edits = await admin.evaluate(
+    element => (element as HTMLElement & Record<string, unknown>)['testEdits'],
+  );
+  expect(edits).toMatchObject([
+    {
+      photo: {
+        caption: 'Pie al retirar',
+        location: 'Francia',
+        altText: 'El Sena',
+        credit: { color: 'dark' },
+      },
+      previous: {
+        caption: 'Junto al Sena',
+        location: 'París',
+        credit: { color: 'auto' },
+      },
+    },
+  ]);
+  await admin.getByRole('button', { name: 'Guardar borrador' }).click();
+  expect(await calls(admin)).toEqual(['unpublish', 'save:0']);
+});
+
+test('a failed withdrawal retains the published state and pending shared edits', async ({
+  page,
+}) => {
+  const admin = await mount(page, true);
+  await admin
+    .getByLabel('Pie de foto', { exact: true })
+    .fill('Edición pendiente');
+  await admin.evaluate(element => {
+    (element as HTMLElement & Record<string, unknown>)['rejectUnpublish'] =
+      true;
+  });
+  await admin.getByRole('button', { name: 'Retirar', exact: true }).click();
+  await expect(admin.getByRole('alert')).toContainText('No se pudo retirar');
+  await expect(
+    admin.getByRole('button', { name: 'Guardar cambios' }),
+  ).toBeVisible();
+  await expect(admin.getByLabel('Pie de foto', { exact: true })).toHaveValue(
+    'Edición pendiente',
+  );
 });
 
 for (const action of ['regeneratePhoto', 'replacePhoto']) {

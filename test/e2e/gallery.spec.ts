@@ -731,6 +731,7 @@ test('shows detected duplicates and safely keeps the selected photo', async ({
     });
     const jpg = createPhoto('jpg', 'atardecer.jpg');
     const jpeg = createPhoto('jpeg', 'atardecer.jpeg');
+    const unrelated = createPhoto('unrelated', 'otra.jpg');
     const album = {
       id: 'album',
       slug: 'album',
@@ -742,8 +743,8 @@ test('shows detected duplicates and safely keeps the selected photo', async ({
       endDate: '',
       category: '',
       coverPhotoId: 'jpeg',
-      photoOrder: ['jpg', 'jpeg'],
-      photos: { jpg, jpeg },
+      photoOrder: ['unrelated', 'jpg', 'jpeg'],
+      photos: { unrelated, jpg, jpeg },
       status: 'published',
       featured: false,
       createdAt: 1,
@@ -756,11 +757,13 @@ test('shows detected duplicates and safely keeps the selected photo', async ({
     admin['repository'] = {
       removeAlbumPhotos: async (value: typeof album, ids: string[]) => {
         calls.push(`remove:${ids.join(',')}`);
+        calls.push(`cover:${value.coverPhotoId}`);
         const next = structuredClone(value);
         for (const id of ids)
           delete (next.photos as Record<string, unknown>)[id];
         next.photoOrder = next.photoOrder.filter(id => !ids.includes(id));
-        next.coverPhotoId = next.photoOrder[0]!;
+        if (!next.coverPhotoId || ids.includes(next.coverPhotoId))
+          next.coverPhotoId = next.photoOrder[0]!;
         return next;
       },
     };
@@ -811,7 +814,17 @@ test('shows detected duplicates and safely keeps the selected photo', async ({
           (element as HTMLElement & Record<string, unknown>)['testCalls'],
       ),
     )
-    .toEqual(['remove:jpeg']);
+    .toEqual(['remove:jpeg', 'cover:jpg']);
+  expect(
+    await admin.evaluate(
+      element =>
+        (
+          (element as HTMLElement & Record<string, unknown>)['draft'] as {
+            coverPhotoId: string;
+          }
+        ).coverPhotoId,
+    ),
+  ).toBe('jpg');
 });
 
 test('publishes regenerated credit before deleting its old variants', async ({

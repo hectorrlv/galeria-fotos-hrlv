@@ -248,18 +248,22 @@ export class GalleryRepository {
     });
   }
 
-  async unpublishAlbum(album: Album): Promise<void> {
+  async unpublishAlbum(
+    album: Album,
+    edits: readonly PhotoEdit[] = [],
+  ): Promise<Album> {
     if (!this.services) throw new Error('Firebase no está configurado.');
-    await this.transact(data => {
+    const saved = await this.transact(data => {
       const next = saveSharedAlbum(
         data,
         { ...album, status: 'draft' },
-        [],
+        edits,
         false,
       );
       if (next.public?.albums) delete next.public.albums[album.id];
       return next;
     });
+    return privateAlbums(saved.private).find(item => item.id === album.id)!;
   }
 
   async saveSiteConfig(config: SiteConfig): Promise<void> {
