@@ -8,6 +8,11 @@ declare const __FIREBASE_STORAGE_BUCKET__: string;
 declare const __FIREBASE_MESSAGING_SENDER_ID__: string;
 declare const __FIREBASE_APP_ID__: string;
 declare const __FIREBASE_MEASUREMENT_ID__: string;
+declare const __FIREBASE_EMULATORS_ENABLED__: boolean;
+
+export const firebaseEmulatorsEnabled =
+  typeof __FIREBASE_EMULATORS_ENABLED__ !== 'undefined' &&
+  __FIREBASE_EMULATORS_ENABLED__;
 
 export const firebaseConfig: FirebaseOptions = {
   apiKey: __FIREBASE_API_KEY__,

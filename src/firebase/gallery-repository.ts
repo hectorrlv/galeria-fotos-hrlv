@@ -1,6 +1,7 @@
 import {
   get,
   onValue,
+  remove,
   ref as databaseRef,
   runTransaction,
   update,
@@ -34,6 +35,7 @@ import {
   type GalleryDatabase,
 } from './shared-photos.js';
 import { versionedOriginalPath } from './storage-paths.js';
+import { EDITORIAL_LAYOUT_VERSION, EDITORIAL_ROOT } from './editorial-data.js';
 
 type ErrorCallback = (error: Error) => void;
 
@@ -50,10 +52,10 @@ export class GalleryRepository {
       queueMicrotask(() => callback([]));
       return () => undefined;
     }
-    return onValue(
-      databaseRef(this.services.database, 'public/albums'),
-      snapshot => callback(albumValues(snapshot.val())),
-      error => onError?.(error),
+    return this.subscribeEditorial(
+      'public/albums',
+      value => callback(albumValues(value)),
+      onError,
     );
   }
 
@@ -65,10 +67,10 @@ export class GalleryRepository {
       queueMicrotask(() => callback([]));
       return () => undefined;
     }
-    return onValue(
-      databaseRef(this.services.database, 'private'),
-      snapshot => callback(privateAlbums(snapshot.val())),
-      error => onError?.(error),
+    return this.subscribeEditorial(
+      'private',
+      value => callback(privateAlbums(value as GalleryDatabase['private'])),
+      onError,
     );
   }
 
@@ -81,17 +83,14 @@ export class GalleryRepository {
       queueMicrotask(() => callback({ ...DEFAULT_SITE_CONFIG }));
       return () => undefined;
     }
-    return onValue(
-      databaseRef(
-        this.services.database,
-        `${isPrivate ? 'private' : 'public'}/site`,
-      ),
-      snapshot =>
+    return this.subscribeEditorial(
+      `${isPrivate ? 'private' : 'public'}/site`,
+      value =>
         callback({
           ...DEFAULT_SITE_CONFIG,
-          ...(snapshot.val() as Partial<SiteConfig> | null),
+          ...(value as Partial<SiteConfig> | null),
         }),
-      error => onError?.(error),
+      onError,
     );
   }
 
@@ -107,29 +106,81 @@ export class GalleryRepository {
       queueMicrotask(() => callback([], [], true));
       return () => undefined;
     }
-    return onValue(
-      databaseRef(this.services.database, 'private'),
-      snapshot => {
-        const data = snapshot.val() as GalleryDatabase['private'];
+    return this.subscribeEditorial(
+      'private',
+      (value, migrated) => {
+        const data = value as GalleryDatabase['private'];
         callback(
           [
             ...Object.values(data?.photos ?? {}),
             ...Object.values(data?.photoDeletions ?? {}),
           ],
           Object.keys(data?.photoDeletions ?? {}),
-          data?.schemaVersion === 2 ||
-            Object.keys(data?.albums ?? {}).length === 0,
+          (migrated || !data) &&
+            (data?.schemaVersion === 2 ||
+              Object.keys(data?.albums ?? {}).length === 0),
+        );
+      },
+      onError,
+    );
+  }
+
+  private subscribeEditorial(
+    path: string,
+    callback: (value: unknown, migrated: boolean) => void,
+    onError?: ErrorCallback,
+  ): Unsubscribe {
+    const database = this.services!.database;
+    let unsubscribeValue: Unsubscribe = () => undefined;
+    let generation = 0;
+    const unsubscribeLayout = onValue(
+      databaseRef(database, `${EDITORIAL_ROOT}/layoutVersion`),
+      snapshot => {
+        const migrated = snapshot.val() === EDITORIAL_LAYOUT_VERSION;
+        const current = ++generation;
+        unsubscribeValue();
+        unsubscribeValue = onValue(
+          databaseRef(database, migrated ? `${EDITORIAL_ROOT}/${path}` : path),
+          value => {
+            if (current === generation) callback(value.val(), migrated);
+          },
+          error => onError?.(error),
         );
       },
       error => onError?.(error),
     );
+    return () => {
+      ++generation;
+      unsubscribeLayout();
+      unsubscribeValue();
+    };
+  }
+
+  private async editorialRoot() {
+    if (!this.services) throw new Error('Firebase no está configurado.');
+    const database = this.services.database;
+    const layout = await get(
+      databaseRef(database, `${EDITORIAL_ROOT}/layoutVersion`),
+    );
+    if (layout.exists() && layout.val() !== EDITORIAL_LAYOUT_VERSION)
+      throw new Error('Versión editorial desconocida.');
+    if (!layout.exists()) {
+      const legacy = await Promise.all(
+        ['private', 'public'].map(path => get(databaseRef(database, path))),
+      );
+      if (legacy.some(snapshot => snapshot.exists()))
+        throw new Error(
+          'La biblioteca necesita la migración editorial antes de guardar. Consulta README.',
+        );
+    }
+    return databaseRef(database, EDITORIAL_ROOT);
   }
 
   private async transact(
     reducer: (data: GalleryDatabase) => GalleryDatabase,
   ): Promise<GalleryDatabase> {
     if (!this.services) throw new Error('Firebase no está configurado.');
-    const root = databaseRef(this.services.database);
+    const root = await this.editorialRoot();
     // Keep a complete listener alive while transacting. A one-shot get alone can
     // be evicted before runTransaction and make its first callback see null.
     let unsubscribe: Unsubscribe = () => undefined;
@@ -137,9 +188,16 @@ export class GalleryRepository {
       await new Promise<void>((resolve, reject) => {
         unsubscribe = onValue(root, () => resolve(), reject);
       });
-      const result = await runTransaction(root, value => reducer(value ?? {}), {
-        applyLocally: false,
-      });
+      const result = await runTransaction(
+        root,
+        value => ({
+          ...reducer(value ?? {}),
+          layoutVersion: EDITORIAL_LAYOUT_VERSION,
+        }),
+        {
+          applyLocally: false,
+        },
+      );
       if (!result.committed)
         throw new Error('No fue posible guardar los cambios.');
       return result.snapshot.val() as GalleryDatabase;
@@ -220,6 +278,9 @@ export class GalleryRepository {
     const saved = await this.transact(data =>
       markPhotoForDeletion(data, photoId),
     );
+    // The tombstone and absence of public references prevent new votes. Keep the
+    // tombstone if this independent cleanup fails so deletion remains retryable.
+    await remove(databaseRef(this.services!.database, `photoLikes/${photoId}`));
     const photo = saved.private?.photoDeletions?.[photoId];
     if (!photo) return;
     // A tombstone blocks reuse while Storage deletion is running, and allows retry.
@@ -268,7 +329,8 @@ export class GalleryRepository {
 
   async saveSiteConfig(config: SiteConfig): Promise<void> {
     if (!this.services) throw new Error('Firebase no está configurado.');
-    await update(databaseRef(this.services.database), {
+    await update(await this.editorialRoot(), {
+      layoutVersion: EDITORIAL_LAYOUT_VERSION,
       'private/site': config,
       'public/site': config,
     });
@@ -320,7 +382,7 @@ export class GalleryRepository {
   async deletePaths(paths: readonly string[]): Promise<void> {
     const services = this.services;
     if (!services) throw new Error('Firebase no está configurado.');
-    const current = await get(databaseRef(services.database));
+    const current = await get(await this.editorialRoot());
     const unused = unreferencedPaths(current.val() ?? {}, paths);
     await Promise.all(
       unused.map(async path => {

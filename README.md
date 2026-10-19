@@ -70,19 +70,71 @@ gcloud storage buckets describe \
   --format='default(cors_config)'
 ```
 
-Las reglas reservan `/private` y `/originals` para el administrador. Los
-visitantes solo pueden leer `/public` en Database y Storage.
+Las reglas reservan `/editorial/private` en Database y `/originals` en Storage
+para el administrador. La galería pública lee `/editorial/public` en Database y
+`/public` en Storage. Antes de la migración editorial, se mantienen las lecturas
+de las rutas anteriores `/private` y `/public` de Database.
+
+### Likes sin registro
+
+La cuadrícula y el visor comparten un corazón y contador por fotografía, incluso
+cuando aparece en varios álbumes. Firebase crea una identidad anónima al primer
+like y conserva la sesión en el navegador. Teléfono, iPad, otros navegadores y
+sesiones privadas pueden tener identidades distintas. Borrar los datos del sitio
+puede generar una nueva identidad; no se garantiza un voto por persona.
+
+Los datos viven en `/photoLikes/{photoId}/count` y
+`/photoLikes/{photoId}/voters/{uid}/albumId`, separados de los snapshots de los
+álbumes. El contador es público; cada visitante solo puede leer y modificar su
+voto. Las reglas exigen que voto y contador se actualicen juntos y rechazan votos
+para fotografías que no estén visibles en un álbum publicado. Los likes se
+conservan al editar o retirar de publicación y se eliminan al borrar
+definitivamente la foto. La sesión del administrador se reutiliza; una sesión
+anónima sigue viendo el formulario de acceso en `/admin`.
+
+Para activar esta función en un entorno publicado, después de revisar los cambios:
+
+1. En Firebase Console → Authentication → Sign-in method, habilita **Anonymous**.
+   Si el proyecto usa Identity Platform, conserva desactivada la limpieza
+   automática de cuentas anónimas para mantener la posibilidad de retirar likes
+   en visitas posteriores.
+2. Despliega las reglas con `firebase deploy --only database --project galeria-fotos-hrlv`.
+   Si la base conserva `/private` y `/public` en la raíz, prepara también la
+   migración editorial descrita más abajo.
+3. Publica la aplicación mediante el flujo habitual de Hosting. Publicar Hosting
+   por sí solo no actualiza las reglas ni habilita el proveedor anónimo.
+4. Verifica en ese entorno dar y quitar un like, recargar y acceder a `/admin`.
+
+La implementación local no activa proveedores ni despliega Firebase real.
+No requiere Cloud Functions ni un servidor adicional.
+
+Para verificar localmente se requieren Firebase CLI, Java y Chromium de Playwright:
+
+```sh
+pnpm test:likes
+pnpm test:likes:e2e
+```
+
+Ambos comandos usan únicamente el proyecto ficticio `demo-gallery-likes`, Auth en
+`127.0.0.1:9109` y Database en `127.0.0.1:9019`. El segundo inicia la aplicación
+en `127.0.0.1:8017` con configuración ficticia, comprueba escritorio y móvil,
+persistencia al recargar, sincronización entre pestañas e identidades separadas.
+`FIREBASE_EMULATORS_ENABLED=1` selecciona esta configuración durante el build;
+solo funciona en localhost y nunca utiliza las variables del proyecto real.
+Las pruebas habituales `pnpm test:e2e` mantienen el modo de demostración y omiten
+las pruebas que requieren estos emuladores.
 
 ## Modelo de datos
 
-- `/private/photos/{photoId}` conserva una única fotografía, sus metadatos,
+- `/editorial/layoutVersion: 1` identifica la ubicación aislada para transacciones editoriales.
+- `/editorial/private/photos/{photoId}` conserva una única fotografía, sus metadatos,
   crédito y rutas de archivos. No pertenece a un álbum concreto.
-- `/private/albums/{albumId}/photoRefs/{photoId}` conserva la asociación y
+- `/editorial/private/albums/{albumId}/photoRefs/{photoId}` conserva la asociación y
   visibilidad de la fotografía en ese álbum. Orden y portada son propios del álbum.
-- `/private/schemaVersion: 2` indica que se completó la conversión al modelo compartido.
-- `/public/albums/{albumId}` contiene snapshots sanitizados de álbumes
+- `/editorial/private/schemaVersion: 2` indica que se completó la conversión al modelo compartido.
+- `/editorial/public/albums/{albumId}` contiene snapshots sanitizados de álbumes
   publicados.
-- `/private/site` y `/public/site` contienen la identidad y los valores
+- `/editorial/private/site` y `/editorial/public/site` contienen la identidad y los valores
   predeterminados del crédito.
 - `originals/photos/{photoId}` guarda los nuevos originales intactos.
 - `public/photos/{photoId}` guarda sus miniaturas, cuadrícula y visor en WebP.
@@ -143,24 +195,61 @@ snapshots públicos existentes. No fusiona por nombre; si dos registros antiguos
 comparten ID, asigna otro ID a la colisión y remapea sus referencias. Repetir la
 conversión sobre una exportación con versión 2 no vuelve a convertirla.
 
+Si la base ya usa fotografías compartidas (versión 2), omite esa conversión.
+En caso contrario, usa su salida como entrada al siguiente migrador. No reemplaces
+la raíz con una exportación antigua cuando existan likes recibidos posteriormente.
+
+### Aislamiento de transacciones editoriales
+
+Álbumes, fotos y snapshots públicos se guardan juntos mediante una transacción en
+`/editorial`. `/photoLikes` es una rama hermana: sus cambios no invalidan la
+transacción editorial ni provocan que se descarguen votos durante cada guardado.
+La eliminación definitiva marca primero la foto como no reutilizable dentro de
+`/editorial`; después elimina sus likes y archivos por separado. Si alguna limpieza
+falla, se conserva la marca para reintentar.
+
+Las bases anteriores siguen siendo consultables. La nueva administración bloquea
+su edición hasta convertirlas; una base vacía se inicializa al guardar. La
+conversión conserva IDs, URLs, borradores y snapshots públicos sin mover archivos.
+
+```sh
+# Simulación offline, sin escrituras.
+node --import tsx scripts/migrate-editorial-root.mjs /ruta/exportacion.json
+
+# Respaldo privado del archivo de entrada y parche nuevo, sin tocar Firebase.
+node --import tsx scripts/migrate-editorial-root.mjs /ruta/exportacion.json \
+  --apply --output /ruta/parche-editorial.json
+```
+
+El parche contiene solo `editorial`, `private: null` y `public: null`. No contiene
+likes ni otros datos de la raíz. El migrador rechaza exportaciones mixtas y nunca
+sobrescribe el archivo de entrada ni una salida existente.
+
 Para una publicación posterior autorizada:
 
-1. Pausa la edición y cierra todas las sesiones de administración. Exporta la
-   raíz desde Firebase Console y conserva el respaldo fuera del repositorio.
-2. Ejecuta la simulación y conversión; verifica el resultado en un emulador o
-   proyecto de prueba antes de importar datos reales.
-3. Manteniendo la pausa, despliega las reglas revisadas e importa la exportación
-   convertida desde Console. Publica después el nuevo Hosting y abre una sesión
-   nueva para verificar el selector, un álbum compartido y la galería pública.
-4. Si hay que revertir antes de reanudar la edición, restaura el respaldo,
-   las reglas y Hosting de la versión anterior durante la misma pausa. No uses
-   un respaldo antiguo para revertir después de nuevas ediciones.
+1. Pausa la edición, cierra las sesiones administrativas y exporta la raíz desde
+   Firebase Console. Conserva el respaldo fuera del repositorio.
+2. Genera el parche y verifica la conversión con emuladores. Si hace falta,
+   convierte primero las fotografías compartidas sobre esa exportación.
+3. Despliega las reglas revisadas y el nuevo Hosting. Mientras los datos sigan
+   en las rutas anteriores, la galería pública y sus likes siguen funcionando;
+   la nueva administración permanece en modo de consulta.
+4. Aplica el parche como **actualización**, sin reemplazar la raíz:
+   `firebase database:update / /ruta/parche-editorial.json --project galeria-fotos-hrlv`.
+   Las tres ramas cambian de forma atómica y los likes recibidos después de la
+   exportación permanecen intactos.
+5. Abre una sesión nueva y verifica galería, likes, guardado y publicación antes
+   de reanudar la edición. Las sesiones antiguas no pueden recrear las rutas
+   anteriores después de convertirlas.
 
-Las reglas permiten al mismo UID administrador leer y escribir la raíz para
-coordinar fotografías y snapshots públicos en una transacción. Los visitantes
-siguen leyendo solo `/public`; `/private` y los originales conservan su acceso
-privado. Las reglas rechazan fotos embebidas del administrador antiguo tras
-activar la versión 2 y prohíben `originalPath` en snapshots públicos.
+Para revertir durante esa misma pausa, prepara una actualización inversa que
+restaure únicamente `private` y `public` del respaldo y elimine `editorial`, y
+restaura reglas y Hosting anteriores. Conserva los likes actuales; no importes el
+respaldo completo ni uses datos antiguos después de nuevas ediciones.
+
+Las reglas mantienen los borradores y originales privados, validan las referencias
+compartidas y prohíben `originalPath` en snapshots públicos. Ninguno de estos pasos
+de despliegue o migración real se ejecuta automáticamente.
 
 ### Validación con emulador
 

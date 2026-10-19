@@ -19,6 +19,8 @@
     "format:check": "prettier . --check",
     "test": "node --import tsx --test \"test/unit/**/*.test.ts\"",
     "test:e2e": "playwright test",
+    "test:likes": "firebase emulators:exec --project demo-gallery-likes --only auth,database 'node --import tsx --test --test-force-exit test/integration/photo-likes.test.ts'",
+    "test:likes:e2e": "firebase emulators:exec --project demo-gallery-likes --only auth,database 'playwright test --config playwright.likes.config.ts'",
     "check": "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run test && pnpm run build"
   },
   "dependencies": {

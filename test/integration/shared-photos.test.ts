@@ -1,3 +1,4 @@
+import { isolateEditorialData } from '../../src/firebase/editorial-data.js';
 import assert from 'node:assert/strict';
 import { after, beforeEach, test } from 'node:test';
 import { deleteApp, initializeApp } from 'firebase/app';
@@ -86,7 +87,7 @@ const p: GalleryPhoto = {
   altText: 'París',
   visible: true,
   originalPath: 'originals/p.jpg',
-  publicPaths: ['public/p.webp'],
+  publicPaths: ['editorial/public/p.webp'],
   urls: { thumbnail: 'thumb', grid: 'grid', viewer: 'viewer' },
   credit: DEFAULT_CREDIT,
 };
@@ -111,7 +112,10 @@ const seed = migrateSharedPhotos({
 });
 
 beforeEach(async () => {
-  await set(ref(database), JSON.parse(JSON.stringify(seed)));
+  await set(
+    ref(database),
+    isolateEditorialData(JSON.parse(JSON.stringify(seed))),
+  );
 });
 after(async () => {
   await Promise.all(apps.map(app => deleteApp(app)));
@@ -133,7 +137,7 @@ test('transactions associate, update all public appearances and remove reference
   await repo.saveAlbum(edited, [
     { photo: sharedPhoto(edited.photos.p!), previous: sharedPhoto(p) },
   ]);
-  const saved = (await get(ref(database))).val();
+  const saved = (await get(ref(database, 'editorial'))).val();
   assert.equal(saved.public.albums.a.photos.p.caption, 'Después');
   assert.equal(saved.public.albums.b.photos.p.caption, 'Después');
   assert.equal(saved.public.albums.b.description, 'Borrador');
@@ -144,7 +148,7 @@ test('transactions associate, update all public appearances and remove reference
   const current = privateAlbums(saved.private).find(a => a.id === 'b')!;
   await repo.unpublishAlbum(current);
   await repo.removeAlbumPhotos({ ...current, status: 'draft' }, ['p']);
-  const final = (await get(ref(database))).val();
+  const final = (await get(ref(database, 'editorial'))).val();
   assert.equal(final.private.photos.p.caption, 'Después');
   assert.equal(final.private.albums.b.photoRefs, undefined);
 });
@@ -160,7 +164,7 @@ test('withdrawing an album saves pending shared edits and updates its other publ
   const associated = await repo.associatePhotos(draft, ['p']);
   await repo.publishAlbum(associated, []);
   await set(
-    ref(database, 'private/albums/b/description'),
+    ref(database, 'editorial/private/albums/b/description'),
     'Pendiente de publicar',
   );
   const edited = album('a');
@@ -177,7 +181,7 @@ test('withdrawing an album saves pending shared edits and updates its other publ
       previous: sharedPhoto(p),
     },
   ]);
-  const saved = (await get(ref(database))).val();
+  const saved = (await get(ref(database, 'editorial'))).val();
   assert.equal(saved.public.albums.a, undefined);
   assert.equal(saved.private.albums.a.status, 'draft');
   assert.equal(saved.private.albums.a.description, edited.description);
@@ -218,7 +222,7 @@ test('a stale shared-photo edit cannot partially withdraw the album', async () =
     ]),
     /otra sesión/,
   );
-  const saved = (await get(ref(database))).val();
+  const saved = (await get(ref(database, 'editorial'))).val();
   assert.equal(saved.private.albums.a.status, 'published');
   assert.equal(
     saved.public.albums.a.photos.p.caption,
@@ -230,24 +234,29 @@ test('root reads and writes are admin only, public remains readable and private 
   for (const db of [databases[1]!, databases[2]!]) {
     await assert.rejects(get(ref(db)), /Permission denied/);
     await assert.rejects(
-      set(ref(db, 'private/photos/p/caption'), 'No'),
+      set(ref(db, 'editorial/private/photos/p/caption'), 'No'),
       /PERMISSION_DENIED/,
     );
-    assert.equal((await get(ref(db, 'public/albums/a'))).val().title, 'a');
+    assert.equal(
+      (await get(ref(db, 'editorial/public/albums/a'))).val().title,
+      'a',
+    );
   }
   await assert.rejects(
     set(
-      ref(database, 'public/albums/a/photos/p/originalPath'),
+      ref(database, 'editorial/public/albums/a/photos/p/originalPath'),
       'originals/secret',
     ),
     /PERMISSION_DENIED/,
   );
   await assert.rejects(
-    set(ref(database, 'private/albums/a'), album('a')),
+    set(ref(database, 'editorial/private/albums/a'), album('a')),
     /PERMISSION_DENIED/,
   );
   await assert.rejects(
-    set(ref(database, 'private/albums/a/photoRefs/missing'), { visible: true }),
+    set(ref(database, 'editorial/private/albums/a/photoRefs/missing'), {
+      visible: true,
+    }),
     /PERMISSION_DENIED/,
   );
 });
@@ -261,7 +270,7 @@ test('Storage failure keeps a deletion tombstone and retry completes safely', as
     throw new Error('Storage sin conexión');
   };
   await assert.rejects(repo.deleteUnusedPhoto('p'), /sin conexión/);
-  const marked = (await get(ref(database))).val();
+  const marked = (await get(ref(database, 'editorial'))).val();
   assert.equal(marked.private.photos, undefined);
   assert.ok(marked.private.photoDeletions.p);
   await assert.rejects(
@@ -273,7 +282,7 @@ test('Storage failure keeps a deletion tombstone and retry completes safely', as
   };
   await repo.deleteUnusedPhoto('p');
   assert.equal(
-    (await get(ref(database, 'private/photoDeletions'))).exists(),
+    (await get(ref(database, 'editorial/private/photoDeletions'))).exists(),
     false,
   );
   assert.deepEqual(events, ['storage', 'retry']);
@@ -289,7 +298,7 @@ test('simultaneous edits cannot overwrite an already changed shared photo', asyn
   );
   assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
   assert.equal(results.filter(r => r.status === 'rejected').length, 1);
-  const value = (await get(ref(database))).val();
+  const value = (await get(ref(database, 'editorial'))).val();
   assert.equal(
     value.private.photos.p.caption,
     value.public.albums.a.photos.p.caption,
@@ -314,7 +323,7 @@ test('a concurrent association and permanent deletion cannot leave a dangling re
     outcomes.filter(result => result.status === 'fulfilled').length,
     1,
   );
-  const saved = (await get(ref(database))).val();
+  const saved = (await get(ref(database, 'editorial'))).val();
   if (saved.private.albums?.race?.photoRefs?.p)
     assert.ok(saved.private.photos?.p);
   else assert.equal(saved.private.photos?.p, undefined);
