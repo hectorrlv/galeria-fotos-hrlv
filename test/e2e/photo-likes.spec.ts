@@ -1,3 +1,4 @@
+import { isolateEditorialData } from '../../src/firebase/editorial-data.js';
 import { expect, test, type Page } from '@playwright/test';
 import { deleteApp, initializeApp, type FirebaseApp } from 'firebase/app';
 import {
@@ -5,6 +6,7 @@ import {
   getDatabase,
   ref,
   set,
+  update,
   type Database,
 } from 'firebase/database';
 import { likesSeed } from '../fixtures/photo-likes.js';
@@ -38,7 +40,8 @@ test.beforeAll(() => {
   });
 });
 test.beforeEach(async () => {
-  if (localEmulators) await set(ref(database), likesSeed());
+  if (localEmulators)
+    await set(ref(database), isolateEditorialData(likesSeed()));
 });
 test.afterAll(async () => {
   if (app) await deleteApp(app);
@@ -59,6 +62,35 @@ const visit = async (page: Page) => {
     gridLike(page).getByRole('button', { name: 'Me gusta', exact: true }),
   ).toBeEnabled();
 };
+
+test('an open legacy gallery switches to the editorial layout without losing its likes', async ({
+  page,
+}) => {
+  const legacy = likesSeed();
+  await set(ref(database), legacy);
+  await visit(page);
+  const button = gridLike(page).getByRole('button');
+  await button.click();
+  await expect(button).toBeEnabled();
+  await expect(button).toHaveText('1');
+  const uid = await identity(page);
+  await update(ref(database), {
+    editorial: isolateEditorialData(legacy).editorial,
+    private: null,
+    public: null,
+  });
+  await expect(
+    page.getByRole('button', { name: 'Abrir fotografía 1: Paisaje p' }),
+  ).toBeVisible();
+  await expect(button).toHaveAttribute('aria-pressed', 'true');
+  await button.click();
+  await expect(button).toHaveText('0');
+  await expect(button).toBeEnabled();
+  await page.reload();
+  await expect(button).toBeEnabled();
+  await expect(button).toHaveAttribute('aria-pressed', 'false');
+  expect(await identity(page)).toBe(uid);
+});
 
 test('shares grid/viewer state and persists the identity and like through reload and other albums', async ({
   page,

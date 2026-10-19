@@ -1,3 +1,4 @@
+import { isolateEditorialData } from '../../src/firebase/editorial-data.js';
 import assert from 'node:assert/strict';
 import { after, beforeEach, test } from 'node:test';
 import { deleteApp, initializeApp } from 'firebase/app';
@@ -95,7 +96,7 @@ const count = async () =>
 
 beforeEach(async () => {
   await Promise.all(services.map(s => signOut(s.auth)));
-  await set(ref(owner.database), likesSeed());
+  await set(ref(owner.database), isolateEditorialData(likesSeed()));
 });
 after(async () => {
   await Promise.all(apps.map(app => deleteApp(app)));
@@ -163,7 +164,7 @@ test('public counts and private own votes do not disclose voters or editorial da
   );
   await assert.rejects(get(ref(second.database, 'photoLikes/p/voters')));
   await assert.rejects(get(ref(second.database, `photoLikes/p/voters/${uid}`)));
-  await assert.rejects(get(ref(second.database, 'private/photos')));
+  await assert.rejects(get(ref(second.database, 'editorial/private/photos')));
   await assert.rejects(set(ref(second.database, 'photoLikes/p/count'), 2));
   await signInAnonymously(second.auth);
   await assert.rejects(get(ref(second.database, `photoLikes/p/voters/${uid}`)));
@@ -220,7 +221,10 @@ test('rules reject arbitrary, fractional, negative, unpaired, foreign and unpubl
   await assert.rejects(update(root, { count: -1, [`voters/${uid}`]: null }));
   await assert.rejects(update(root, { count: 1, other: 'injected' }));
   assert.equal(await count(), 1);
-  await set(ref(owner.database, 'public/albums/viaje/photos/p'), null);
+  await set(
+    ref(owner.database, 'editorial/public/albums/viaje/photos/p'),
+    null,
+  );
   await assert.rejects(
     update(root, {
       count: increment(1),
@@ -230,26 +234,108 @@ test('rules reject arbitrary, fractional, negative, unpaired, foreign and unpubl
   await assert.rejects(
     new PhotoLikesService(second).setLiked('p', 'viaje', true),
   );
-  await set(ref(owner.database, 'public/albums/viaje/photos/q/visible'), false);
+  await set(
+    ref(owner.database, 'editorial/public/albums/viaje/photos/q/visible'),
+    false,
+  );
   await assert.rejects(client().setLiked('q', 'viaje', true));
   assert.equal(await count(), 1);
 });
 
-test('a concurrent editorial transaction preserves visitor likes', async () => {
+test('sustained likes on an unrelated photo do not retry or enter an editorial transaction', async () => {
   const repository = new GalleryRepository(owner);
+  const transact = repository['transact'].bind(repository);
+  let attempts = 0;
+  repository['transact'] = reducer =>
+    transact(data => {
+      ++attempts;
+      assert.equal('photoLikes' in data, false);
+      return reducer(data);
+    });
+  await client().setLiked('p', 'viaje', true);
+  const visitor = new PhotoLikesService(second);
+  await visitor.setLiked('q', 'viaje', true);
   const before = likesSeed().private!.photos!.p!;
   const after = { ...before, caption: 'Edición concurrente' };
   await Promise.all([
     repository.savePhoto(after, before),
-    client().setLiked('p', 'viaje', true),
+    (async () => {
+      for (let i = 0; i < 30; ++i)
+        await visitor.setLiked('q', 'viaje', i % 2 === 1);
+    })(),
   ]);
+  assert.equal(attempts, 1);
   assert.equal(await count(), 1);
   assert.equal(
     (
-      await get(ref(owner.database, 'public/albums/viaje/photos/p/caption'))
+      await get(
+        ref(owner.database, 'editorial/public/albums/viaje/photos/p/caption'),
+      )
     ).val(),
     'Edición concurrente',
   );
+});
+
+test('legacy reads remain available and migration preserves likes received after the export', async () => {
+  const legacy = likesSeed();
+  await set(ref(owner.database), legacy);
+  const repository = new GalleryRepository(owner);
+  let writable = true;
+  const stopPhotos = repository.subscribePrivatePhotos(
+    (_photos, _deleting, value) => {
+      writable = value;
+    },
+  );
+  const publicAlbums = await new Promise<unknown[]>((resolve, reject) => {
+    let stop = () => undefined as void;
+    stop = repository.subscribePublicAlbums(albums => {
+      queueMicrotask(() => stop());
+      resolve(albums);
+    }, reject);
+  });
+  try {
+    assert.equal(publicAlbums.length, 2);
+    assert.equal(writable, false);
+    const photo = legacy.private!.photos!.p!;
+    await assert.rejects(
+      repository.savePhoto({ ...photo, caption: 'No guardar aún' }, photo),
+      /migración editorial/,
+    );
+    await client().setLiked('p', 'viaje', true);
+    const exported = (await get(ref(owner.database))).val();
+    await new PhotoLikesService(second).setLiked('p', 'viaje', true);
+    const converted = isolateEditorialData(exported);
+    await update(ref(owner.database), {
+      editorial: converted.editorial,
+      private: null,
+      public: null,
+    });
+    assert.equal(await count(), 2);
+    // A stale client cannot recreate the old layout after the atomic migration.
+    await assert.rejects(
+      set(ref(owner.database, 'public/site'), { galleryName: 'Antiguo' }),
+    );
+    await repository.savePhoto(
+      { ...photo, caption: 'Después de migrar' },
+      photo,
+    );
+    await client().setLiked('p', 'viaje', false);
+    assert.equal(await count(), 1);
+  } finally {
+    stopPhotos();
+  }
+});
+
+test('an empty database can initialize editorial state without a migration', async () => {
+  await set(ref(owner.database), null);
+  const repository = new GalleryRepository(owner);
+  const { createDraftAlbum } = await import('../../src/models/gallery.js');
+  const draft = createDraftAlbum(1);
+  await repository.saveAlbum(draft);
+  const saved = (await get(ref(owner.database, 'editorial'))).val();
+  assert.equal(saved.layoutVersion, 1);
+  assert.equal(saved.private.schemaVersion, 2);
+  assert.equal(saved.private.albums[draft.id].id, draft.id);
 });
 
 test('keeps likes through editorial changes and unpublication; removes them on permanent deletion', async () => {
@@ -264,7 +350,7 @@ test('keeps likes through editorial changes and unpublication; removes them on p
   await repository.savePhoto(sharedPhoto(edited), sharedPhoto(album.photos.p!));
   assert.equal(await count(), 1);
   for (const a of privateAlbums(
-    (await get(ref(owner.database, 'private'))).val(),
+    (await get(ref(owner.database, 'editorial/private'))).val(),
   )) {
     const draft = await repository.unpublishAlbum(a, []);
     await repository.removeAlbumPhotos(draft, ['p']);

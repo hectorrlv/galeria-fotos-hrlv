@@ -11,7 +11,7 @@
           "$uid": {
             ".read": "auth != null && auth.uid === $uid",
             ".write": "auth != null && auth.uid === $uid",
-            ".validate": "auth.uid === 'tt6Vtlpd7rfbX8F9ZSj2yqTyJTV2' || (newData.hasChild('albumId') && newData.child('albumId').isString() && root.child('public/albums').child(newData.child('albumId').val()).child('status').val() === 'published' && root.child('public/albums').child(newData.child('albumId').val()).child('photos').child($photoId).child('visible').val() === true && !root.child('private/photoDeletions').child($photoId).exists())",
+            ".validate": "auth.uid === 'tt6Vtlpd7rfbX8F9ZSj2yqTyJTV2' || (newData.hasChild('albumId') && newData.child('albumId').isString() && root.child(root.child('editorial/layoutVersion').val() === 1 ? 'editorial/public/albums' : 'public/albums').child(newData.child('albumId').val()).child('status').val() === 'published' && root.child(root.child('editorial/layoutVersion').val() === 1 ? 'editorial/public/albums' : 'public/albums').child(newData.child('albumId').val()).child('photos').child($photoId).child('visible').val() === true && !root.child(root.child('editorial/layoutVersion').val() === 1 ? 'editorial/private/photoDeletions' : 'private/photoDeletions').child($photoId).exists())",
             "albumId": {
               ".validate": "newData.isString()"
             },
@@ -59,6 +59,47 @@
       }
     },
     ".read": "auth != null && auth.uid === 'tt6Vtlpd7rfbX8F9ZSj2yqTyJTV2'",
-    ".write": "auth != null && auth.uid === 'tt6Vtlpd7rfbX8F9ZSj2yqTyJTV2'"
+    ".write": "auth != null && auth.uid === 'tt6Vtlpd7rfbX8F9ZSj2yqTyJTV2'",
+    "editorial": {
+      ".validate": "newData.child('layoutVersion').val() === 1",
+      "layoutVersion": {
+        ".read": true,
+        ".validate": "newData.val() === 1"
+      },
+      "private": {
+        ".read": "auth != null && auth.uid === 'tt6Vtlpd7rfbX8F9ZSj2yqTyJTV2'",
+        ".write": "auth != null && auth.uid === 'tt6Vtlpd7rfbX8F9ZSj2yqTyJTV2'",
+        "albums": {
+          "$albumId": {
+            ".validate": "newData.val() == null || newData.parent().parent().child('schemaVersion').val() !== 2 || (!newData.hasChild('photos') && newData.child('id').val() === $albumId)",
+            "photoRefs": {
+              "$photoId": {
+                ".validate": "newData.hasChild('visible') && newData.child('visible').isBoolean() && newData.parent().parent().parent().parent().child('photos').child($photoId).exists()"
+              }
+            }
+          }
+        },
+        "photos": {
+          "$photoId": {
+            ".validate": "newData.val() == null || (newData.child('id').val() === $photoId && !newData.hasChild('albumId') && !newData.hasChild('visible'))"
+          }
+        }
+      },
+      "public": {
+        ".read": true,
+        ".write": "auth != null && auth.uid === 'tt6Vtlpd7rfbX8F9ZSj2yqTyJTV2'",
+        "albums": {
+          "$albumId": {
+            ".validate": "newData.val() == null || (newData.hasChildren(['id', 'slug', 'title', 'status', 'photos', 'photoOrder']) && newData.child('id').val() === $albumId && newData.child('status').val() === 'published')",
+            "photos": {
+              "$photoId": {
+                ".validate": "!newData.hasChild('originalPath')"
+              }
+            }
+          }
+        }
+      }
+    },
+    ".validate": "!newData.hasChild('editorial') || (!newData.hasChild('private') && !newData.hasChild('public'))"
   }
 }
