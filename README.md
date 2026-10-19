@@ -70,8 +70,56 @@ gcloud storage buckets describe \
   --format='default(cors_config)'
 ```
 
-Las reglas reservan `/private` y `/originals` para el administrador. Los
-visitantes solo pueden leer `/public` en Database y Storage.
+Las reglas reservan `/private` y `/originals` para el administrador. La galería
+pública lee `/public` en Database y Storage; los contadores y votos tienen los
+permisos específicos descritos a continuación.
+
+### Likes sin registro
+
+La cuadrícula y el visor comparten un corazón y contador por fotografía, incluso
+cuando aparece en varios álbumes. Firebase crea una identidad anónima al primer
+like y conserva la sesión en el navegador. Teléfono, iPad, otros navegadores y
+sesiones privadas pueden tener identidades distintas. Borrar los datos del sitio
+puede generar una nueva identidad; no se garantiza un voto por persona.
+
+Los datos viven en `/photoLikes/{photoId}/count` y
+`/photoLikes/{photoId}/voters/{uid}/albumId`, separados de los snapshots de los
+álbumes. El contador es público; cada visitante solo puede leer y modificar su
+voto. Las reglas exigen que voto y contador se actualicen juntos y rechazan votos
+para fotografías que no estén visibles en un álbum publicado. Los likes se
+conservan al editar o retirar de publicación y se eliminan al borrar
+definitivamente la foto. La sesión del administrador se reutiliza; una sesión
+anónima sigue viendo el formulario de acceso en `/admin`.
+
+Para activar esta función en un entorno publicado, después de revisar los cambios:
+
+1. En Firebase Console → Authentication → Sign-in method, habilita **Anonymous**.
+   Si el proyecto usa Identity Platform, conserva desactivada la limpieza
+   automática de cuentas anónimas para mantener la posibilidad de retirar likes
+   en visitas posteriores.
+2. Despliega las reglas con `firebase deploy --only database --project galeria-fotos-hrlv`.
+3. Publica la aplicación mediante el flujo habitual de Hosting. Publicar Hosting
+   por sí solo no actualiza las reglas ni habilita el proveedor anónimo.
+4. Verifica en ese entorno dar y quitar un like, recargar y acceder a `/admin`.
+
+La implementación local no activa proveedores ni despliega Firebase real.
+No requiere Cloud Functions ni un servidor adicional.
+
+Para verificar localmente se requieren Firebase CLI, Java y Chromium de Playwright:
+
+```sh
+pnpm test:likes
+pnpm test:likes:e2e
+```
+
+Ambos comandos usan únicamente el proyecto ficticio `demo-gallery-likes`, Auth en
+`127.0.0.1:9109` y Database en `127.0.0.1:9019`. El segundo inicia la aplicación
+en `127.0.0.1:8017` con configuración ficticia, comprueba escritorio y móvil,
+persistencia al recargar, sincronización entre pestañas e identidades separadas.
+`FIREBASE_EMULATORS_ENABLED=1` selecciona esta configuración durante el build;
+solo funciona en localhost y nunca utiliza las variables del proyecto real.
+Las pruebas habituales `pnpm test:e2e` mantienen el modo de demostración y omiten
+las pruebas que requieren estos emuladores.
 
 ## Modelo de datos
 

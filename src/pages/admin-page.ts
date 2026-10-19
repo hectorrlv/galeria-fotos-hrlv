@@ -536,7 +536,7 @@ export class AdminPage extends LitElement {
     }
     if (!this.authReady)
       return html`<p class="status" role="status">Verificando sesión…</p>`;
-    if (!this.user) return this.renderLogin();
+    if (!this.user || this.user.isAnonymous) return this.renderLogin();
     if (!isAdminUid(this.user.uid)) return this.renderUnauthorized();
     return this.renderStudio();
   }

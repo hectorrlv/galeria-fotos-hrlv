@@ -1,16 +1,23 @@
 import { LitElement, css, html, nothing } from 'lit';
 import type { GalleryPhoto } from '../models/gallery.js';
+import {
+  photoLikes,
+  type PhotoLikesClient,
+} from '../firebase/photo-likes-service.js';
+import './photo-like.js';
 
 export class PhotoViewer extends LitElement {
   static properties = {
     photos: { attribute: false },
     index: { type: Number },
     open: { type: Boolean, reflect: true },
+    likesService: { attribute: false },
   };
 
   declare photos: GalleryPhoto[];
   declare index: number;
   declare open: boolean;
+  declare likesService: PhotoLikesClient;
   private zoom = 1;
   private panX = 0;
   private panY = 0;
@@ -56,9 +63,12 @@ export class PhotoViewer extends LitElement {
         max(clamp(0.75rem, 2vw, 1.5rem), env(safe-area-inset-left));
     }
 
-    .close {
-      grid-column: 1;
-      justify-self: end;
+    .toolbar {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 1rem;
+      min-width: 0;
     }
 
     figure {
@@ -152,6 +162,7 @@ export class PhotoViewer extends LitElement {
     this.photos = [];
     this.index = 0;
     this.open = false;
+    this.likesService = photoLikes;
   }
 
   connectedCallback() {
@@ -191,9 +202,16 @@ export class PhotoViewer extends LitElement {
         aria-modal="true"
         aria-label="Visor de fotografías"
       >
-        <button class="close" @click=${this.close} aria-label="Cerrar visor">
-          ×
-        </button>
+        <div class="toolbar">
+          <photo-like
+            .photoId=${photo.id}
+            .albumId=${photo.albumId}
+            .service=${this.likesService}
+          ></photo-like>
+          <button class="close" @click=${this.close} aria-label="Cerrar visor">
+            ×
+          </button>
+        </div>
         <figure
           @pointerdown=${this.handlePointerDown}
           @pointermove=${this.handlePointerMove}

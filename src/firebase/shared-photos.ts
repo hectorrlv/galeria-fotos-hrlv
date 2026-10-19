@@ -10,6 +10,13 @@ import { albumValues } from './album-data.js';
 import { publicAlbum } from './publication.js';
 
 export interface GalleryDatabase {
+  photoLikes?: Record<
+    string,
+    {
+      count: number;
+      voters?: Record<string, { albumId: string }>;
+    }
+  >;
   private?: {
     schemaVersion?: number;
     albums?: Record<string, StoredAlbum | Album>;
@@ -212,6 +219,7 @@ export const markPhotoForDeletion = (
       'Quita la fotografía de todos sus álbumes antes de eliminarla.',
     );
   const photo = state.photos[photoId];
+  if (data.photoLikes) delete data.photoLikes[photoId];
   if (photo) {
     state.photoDeletions ??= {};
     state.photoDeletions[photoId] = photo;

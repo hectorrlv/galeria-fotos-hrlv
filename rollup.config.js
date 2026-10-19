@@ -8,8 +8,24 @@ import { readFileSync } from 'node:fs';
 dotenv.config();
 
 const firebaseDisabled = process.env.FIREBASE_CONFIG_DISABLED === '1';
+const emulatorsEnabled = process.env.FIREBASE_EMULATORS_ENABLED === '1';
+const emulatorConfig = {
+  FIREBASE_API_KEY: 'demo-gallery-likes-key',
+  FIREBASE_AUTH_DOMAIN: 'demo-gallery-likes.firebaseapp.com',
+  FIREBASE_DATABASE_URL:
+    'https://demo-gallery-likes-default-rtdb.firebaseio.com',
+  FIREBASE_PROJECT_ID: 'demo-gallery-likes',
+  FIREBASE_STORAGE_BUCKET: 'demo-gallery-likes.appspot.com',
+  FIREBASE_APP_ID: 'demo-gallery-likes-app',
+};
 const firebaseValue = name =>
-  JSON.stringify(firebaseDisabled ? '' : (process.env[name] ?? ''));
+  JSON.stringify(
+    emulatorsEnabled
+      ? (emulatorConfig[name] ?? '')
+      : firebaseDisabled
+        ? ''
+        : (process.env[name] ?? ''),
+  );
 
 const logoAsset = () => ({
   name: 'logo-asset',
@@ -32,6 +48,7 @@ export default {
     replace({
       preventAssignment: true,
       values: {
+        __FIREBASE_EMULATORS_ENABLED__: JSON.stringify(emulatorsEnabled),
         __FIREBASE_API_KEY__: firebaseValue('FIREBASE_API_KEY'),
         __FIREBASE_AUTH_DOMAIN__: firebaseValue('FIREBASE_AUTH_DOMAIN'),
         __FIREBASE_DATABASE_URL__: firebaseValue('FIREBASE_DATABASE_URL'),

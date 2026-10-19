@@ -1,5 +1,30 @@
 {
   "rules": {
+    "photoLikes": {
+      "$photoId": {
+        ".validate": "newData.hasChild('count') && newData.child('count').isNumber() && newData.child('count').val() >= 0 && newData.child('count').val() % 1 === 0 && (auth.uid === 'tt6Vtlpd7rfbX8F9ZSj2yqTyJTV2' || newData.child('count').val() === (data.child('count').exists() ? data.child('count').val() : 0) + (newData.child('voters').child(auth.uid).exists() ? 1 : 0) - (data.child('voters').child(auth.uid).exists() ? 1 : 0))",
+        "count": {
+          ".read": true,
+          ".write": "auth != null && newData.isNumber() && (data.exists() || newData.parent().child('voters').child(auth.uid).exists())"
+        },
+        "voters": {
+          "$uid": {
+            ".read": "auth != null && auth.uid === $uid",
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "auth.uid === 'tt6Vtlpd7rfbX8F9ZSj2yqTyJTV2' || (newData.hasChild('albumId') && newData.child('albumId').isString() && root.child('public/albums').child(newData.child('albumId').val()).child('status').val() === 'published' && root.child('public/albums').child(newData.child('albumId').val()).child('photos').child($photoId).child('visible').val() === true && !root.child('private/photoDeletions').child($photoId).exists())",
+            "albumId": {
+              ".validate": "newData.isString()"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
     "public": {
       ".read": true,
       ".write": "auth != null && auth.uid === 'tt6Vtlpd7rfbX8F9ZSj2yqTyJTV2'",

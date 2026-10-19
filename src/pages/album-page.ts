@@ -1,6 +1,8 @@
 import { LitElement, css, html } from 'lit';
 import '../components/album-card.js';
 import '../components/photo-viewer.js';
+import '../components/photo-like.js';
+import { photoLikes } from '../firebase/photo-likes-service.js';
 import { GalleryRepository } from '../firebase/gallery-repository.js';
 import { albumCover, orderedPhotos, type Album } from '../models/gallery.js';
 import { albumPath } from '../navigation/routes.js';
@@ -14,6 +16,7 @@ export class AlbumPage extends LitElement {
 
   declare slug: string;
   private readonly repository = new GalleryRepository();
+  private readonly likesService = photoLikes;
   private albums: Album[] = [];
   private loading = true;
   private viewerIndex = 0;
@@ -94,9 +97,22 @@ export class AlbumPage extends LitElement {
         gap: 0.45rem;
       }
 
-      .photo {
+      .photo-card {
+        position: relative;
         min-width: min(100%, 14rem);
         flex: var(--ratio) 1 18rem;
+      }
+
+      .photo-card photo-like {
+        position: absolute;
+        right: 0.65rem;
+        bottom: 0.65rem;
+      }
+
+      .photo {
+        width: 100%;
+        height: 100%;
+        display: block;
         overflow: hidden;
         padding: 0;
         border: 0;
@@ -166,7 +182,7 @@ export class AlbumPage extends LitElement {
           grid-template-columns: 1fr;
         }
 
-        .photo {
+        .photo-card {
           min-width: 100%;
         }
 
@@ -278,20 +294,29 @@ export class AlbumPage extends LitElement {
         <div class="photos">
           ${photos.map(
             (photo, index) =>
-              html`<button
-                class="photo"
+              html`<div
+                class="photo-card"
                 style=${`--ratio: ${Math.max(0.65, photo.width / photo.height)}`}
-                @click=${() => this.openViewer(index)}
-                aria-label=${`Abrir fotografía ${index + 1}: ${photo.altText}`}
               >
-                <img
-                  src=${photo.urls.grid}
-                  alt=${photo.altText}
-                  loading="lazy"
-                  width=${photo.width}
-                  height=${photo.height}
-                />
-              </button>`,
+                <button
+                  class="photo"
+                  @click=${() => this.openViewer(index)}
+                  aria-label=${`Abrir fotografía ${index + 1}: ${photo.altText}`}
+                >
+                  <img
+                    src=${photo.urls.grid}
+                    alt=${photo.altText}
+                    loading="lazy"
+                    width=${photo.width}
+                    height=${photo.height}
+                  />
+                </button>
+                <photo-like
+                  .photoId=${photo.id}
+                  .albumId=${album.id}
+                  .service=${this.likesService}
+                ></photo-like>
+              </div>`,
           )}
         </div>
       </section>
@@ -326,7 +351,11 @@ export class AlbumPage extends LitElement {
             </section>`
           : ''
       }
-      <photo-viewer .photos=${photos} .index=${this.viewerIndex}></photo-viewer>
+      <photo-viewer
+        .photos=${photos}
+        .index=${this.viewerIndex}
+        .likesService=${this.likesService}
+      ></photo-viewer>
     </div>`;
   }
 
