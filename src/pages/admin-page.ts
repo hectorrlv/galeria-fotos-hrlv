@@ -51,6 +51,7 @@ export class AdminPage extends LitElement {
   private section: EditorSection = 'albums';
   private message = '';
   private error = '';
+  private warning = '';
   private busy = false;
   private uploadProgress = 0;
   private photoFeedbackId = '';
@@ -581,7 +582,9 @@ export class AdminPage extends LitElement {
           La cuenta ${this.user?.email ?? ''} inició sesión, pero su UID no está
           autorizado para administrar la galería.
         </p>
-        <button @click=${() => this.auth.signOut()}>Cerrar sesión</button>
+        <button ?disabled=${this.busy} @click=${() => this.auth.signOut()}>
+          Cerrar sesión
+        </button>
       </section>
     </div>`;
   }
@@ -801,9 +804,22 @@ export class AdminPage extends LitElement {
                   privado y sin modificaciones.
                 </p>
                 <p class="metadata-attribution">
-                  Las ubicaciones se resuelven con datos de OpenStreetMap.
+                  Las ubicaciones se resuelven con datos de
+                  <a
+                    href="https://www.openstreetmap.org/copyright"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    >OpenStreetMap</a
+                  >.
                 </p>
               </div>
+              <button
+                type="button"
+                @click=${() => this.recoverLocations()}
+                ?disabled=${this.busy || !photos.some(photo => !photo.location.trim())}
+              >
+                Completar ubicaciones vacías
+              </button>
               <button
                 type="button"
                 @click=${this.openPhotoLibrary}
@@ -1142,6 +1158,17 @@ export class AdminPage extends LitElement {
           Usar como portada
         </label>
         <div class="photo-actions wide">
+          ${
+            !photo.location.trim()
+              ? html`<button
+                  type="button"
+                  @click=${() => this.recoverLocations(photo)}
+                  ?disabled=${this.busy}
+                >
+                  Recuperar ubicación
+                </button>`
+              : nothing
+          }
           <label class="button">
             Reemplazar archivo
             <input
@@ -1275,11 +1302,11 @@ export class AdminPage extends LitElement {
   }
 
   private renderMessages() {
-    if (this.error)
-      return html`<p class="status error" role="alert">${this.error}</p>`;
-    if (this.message)
-      return html`<p class="status" role="status">${this.message}</p>`;
-    return nothing;
+    return html`
+      ${this.error ? html`<p class="status error" role="alert">${this.error}</p>` : nothing}
+      ${this.message ? html`<p class="status" role="status">${this.message}</p>` : nothing}
+      ${this.warning ? html`<p class="status" role="status">${this.warning}</p>` : nothing}
+    `;
   }
 
   private subscribePrivateData() {
@@ -1444,6 +1471,7 @@ export class AdminPage extends LitElement {
         ?required=${required}
         @input=${(event: Event) => {
           photo[name] = (event.currentTarget as HTMLInputElement).value;
+          this.requestUpdate();
         }}
       />
     </label>`;
@@ -1562,6 +1590,7 @@ export class AdminPage extends LitElement {
   }
 
   private readonly uploadPhotos = async (event: Event) => {
+    if (this.busy) return;
     const input = event.currentTarget as HTMLInputElement;
     const files = [...(input.files ?? [])];
     input.value = '';
@@ -1569,6 +1598,7 @@ export class AdminPage extends LitElement {
     if (!album || files.length === 0) return;
     const next = structuredClone(album);
     const edits = this.photoEdits(album);
+    const unresolved: string[] = [];
     await this.run(
       async () => {
         for (let index = 0; index < files.length; index += 1) {
@@ -1577,6 +1607,11 @@ export class AdminPage extends LitElement {
           this.message = `Procesando ${index + 1} de ${files.length}: ${file.name}`;
           this.requestUpdate();
           const metadata = await this.metadataReader.read(file);
+          if (
+            metadata.locationStatus === 'service-error' ||
+            metadata.locationStatus === 'read-error'
+          )
+            unresolved.push(file.name);
           const result = await this.processor.process(
             file,
             this.site.creditText,
@@ -1632,10 +1667,77 @@ export class AdminPage extends LitElement {
         this.rememberPhotos(saved);
         this.slugAutomatic = false;
         this.uploadProgress = 0;
+        if (unresolved.length)
+          this.warning = `No se pudo resolver la ubicación de: ${unresolved.join(', ')}. Puedes recuperarla desde el original.`;
       },
       `${files.length} fotografía${files.length === 1 ? '' : 's'} agregada${files.length === 1 ? '' : 's'}.`,
     );
   };
+
+  private async recoverLocations(selectedPhoto?: GalleryPhoto) {
+    if (!this.draft || this.busy || !this.libraryWritable) return;
+    const photos = (
+      selectedPhoto ? [selectedPhoto] : orderedPhotos(this.draft)
+    ).filter(photo => !photo.location.trim());
+    if (!photos.length) return;
+    this.busy = true;
+    this.clearMessages();
+    const recovered: string[] = [];
+    const noGps: string[] = [];
+    const downloadErrors: string[] = [];
+    const readErrors: string[] = [];
+    const serviceErrors: string[] = [];
+    try {
+      for (const [index, photo] of photos.entries()) {
+        this.message = `Recuperando ubicación ${index + 1} de ${photos.length}: ${photo.fileName}`;
+        this.requestUpdate();
+        let original: File;
+        try {
+          original = await this.repository.getOriginalFile(photo);
+        } catch {
+          downloadErrors.push(photo.fileName);
+          continue;
+        }
+        let metadata;
+        try {
+          metadata = await this.metadataReader.read(original);
+        } catch {
+          readErrors.push(photo.fileName);
+          continue;
+        }
+        // A subscription may have filled the place while the original was read.
+        if (photo.location.trim()) continue;
+        if (metadata.locationStatus === 'resolved' && metadata.location) {
+          photo.location = metadata.location;
+          recovered.push(photo.fileName);
+        } else if (metadata.locationStatus === 'no-gps') {
+          noGps.push(photo.fileName);
+        } else if (metadata.locationStatus === 'read-error') {
+          readErrors.push(photo.fileName);
+        } else {
+          serviceErrors.push(photo.fileName);
+        }
+      }
+      this.message = `Ubicaciones recuperadas: ${recovered.length}. Sin GPS válido: ${noGps.length}. Errores de descarga: ${downloadErrors.length}. Errores de lectura: ${readErrors.length}. Errores del servicio: ${serviceErrors.length}.${recovered.length ? ' Revisa los lugares y guarda el álbum para conservarlos.' : ''}`;
+      this.warning = [
+        noGps.length ? `Sin GPS válido: ${noGps.join(', ')}.` : '',
+        downloadErrors.length
+          ? `No se pudo descargar el original: ${downloadErrors.join(', ')}.`
+          : '',
+        readErrors.length
+          ? `No se pudieron leer los metadatos: ${readErrors.join(', ')}.`
+          : '',
+        serviceErrors.length
+          ? `No se pudo consultar la ubicación: ${serviceErrors.join(', ')}.`
+          : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
+    } finally {
+      this.busy = false;
+      this.requestUpdate();
+    }
+  }
 
   private async replacePhoto(photo: GalleryPhoto, event: Event) {
     const input = event.currentTarget as HTMLInputElement;
@@ -1938,6 +2040,7 @@ export class AdminPage extends LitElement {
   private clearMessages() {
     this.error = '';
     this.message = '';
+    this.warning = '';
   }
 }
 
