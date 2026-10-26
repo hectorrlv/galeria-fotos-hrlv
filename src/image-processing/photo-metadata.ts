@@ -3,6 +3,7 @@ import exifr from 'exifr';
 export interface PhotoMetadata {
   takenAt?: string;
   location?: string;
+  locationStatus: 'resolved' | 'no-gps' | 'read-error' | 'service-error';
 }
 
 interface ExifTags {
@@ -28,8 +29,10 @@ const parseExif: ExifParser = file =>
       'DateTimeOriginal',
       'CreateDate',
       'ModifyDate',
-      'latitude',
-      'longitude',
+      'GPSLatitude',
+      'GPSLatitudeRef',
+      'GPSLongitude',
+      'GPSLongitudeRef',
     ],
     gps: true,
   }) as Promise<ExifTags | undefined>;
@@ -95,33 +98,46 @@ export class PhotoMetadataReader {
     string,
     Promise<string | undefined>
   >();
-  private lastGeocodeAt = 0;
+  private lastGeocodeAt?: number;
+  private geocodeQueue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly readExif: ExifParser = parseExif,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: typeof fetch = globalThis.fetch.bind(
+      globalThis,
+    ),
     private readonly now: () => number = Date.now,
     private readonly delay: Sleep = sleep,
+    private readonly requestTimeoutMs = 10_000,
   ) {}
 
   async read(file: File): Promise<PhotoMetadata> {
+    let tags: ExifTags | undefined;
     try {
-      const tags = await this.readExif(file);
-      if (!tags) return {};
-      const takenAt = normalizeExifDate(
-        tags.DateTimeOriginal ?? tags.CreateDate ?? tags.ModifyDate,
-      );
-      const metadata: PhotoMetadata = takenAt ? { takenAt } : {};
-      const latitude = Number(tags.latitude);
-      const longitude = Number(tags.longitude);
-      if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-        const location = await this.resolveLocation(latitude, longitude);
-        if (location) metadata.location = location;
-      }
-      return metadata;
+      tags = await this.readExif(file);
     } catch {
-      return {};
+      return { locationStatus: 'read-error' };
     }
+    const metadata: PhotoMetadata = { locationStatus: 'no-gps' };
+    if (!tags) return metadata;
+    const takenAt = normalizeExifDate(
+      tags.DateTimeOriginal ?? tags.CreateDate ?? tags.ModifyDate,
+    );
+    if (takenAt) metadata.takenAt = takenAt;
+    const { latitude, longitude } = tags;
+    if (
+      typeof latitude !== 'number' ||
+      typeof longitude !== 'number' ||
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      Math.abs(latitude) > 90 ||
+      Math.abs(longitude) > 180
+    )
+      return metadata;
+    const location = await this.resolveLocation(latitude, longitude);
+    metadata.locationStatus = location ? 'resolved' : 'service-error';
+    if (location) metadata.location = location;
+    return metadata;
   }
 
   private async resolveLocation(
@@ -131,7 +147,10 @@ export class PhotoMetadataReader {
     const key = `${latitude.toFixed(5)},${longitude.toFixed(5)}`;
     let result = this.locationCache.get(key);
     if (!result) {
-      result = this.reverseGeocode(latitude, longitude);
+      result = this.geocodeQueue.then(() =>
+        this.reverseGeocode(latitude, longitude),
+      );
+      this.geocodeQueue = result.then(() => undefined);
       this.locationCache.set(key, result);
     }
     const location = await result;
@@ -145,9 +164,14 @@ export class PhotoMetadataReader {
     latitude: number,
     longitude: number,
   ): Promise<string | undefined> {
-    const remaining = NOMINATIM_INTERVAL_MS - (this.now() - this.lastGeocodeAt);
+    const remaining =
+      this.lastGeocodeAt === undefined
+        ? 0
+        : NOMINATIM_INTERVAL_MS - (this.now() - this.lastGeocodeAt);
     if (remaining > 0) await this.delay(remaining);
     this.lastGeocodeAt = this.now();
+    const controller = new AbortController();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       const params = new URLSearchParams({
         format: 'jsonv2',
@@ -155,14 +179,29 @@ export class PhotoMetadataReader {
         lon: String(longitude),
         zoom: '10',
         addressdetails: '1',
+        'accept-language': 'es',
       });
-      const response = await this.fetchImpl(`${NOMINATIM_URL}?${params}`);
-      if (!response.ok) return undefined;
-      return formatNominatimLocation(
-        (await response.json()) as NominatimResponse,
-      );
+      return await Promise.race([
+        (async () => {
+          const response = await this.fetchImpl(`${NOMINATIM_URL}?${params}`, {
+            signal: controller.signal,
+          });
+          if (!response.ok) return undefined;
+          return formatNominatimLocation(
+            (await response.json()) as NominatimResponse,
+          );
+        })(),
+        new Promise<undefined>(resolve => {
+          timeout = globalThis.setTimeout(() => {
+            controller.abort();
+            resolve(undefined);
+          }, this.requestTimeoutMs);
+        }),
+      ]);
     } catch {
       return undefined;
+    } finally {
+      globalThis.clearTimeout(timeout);
     }
   }
 }

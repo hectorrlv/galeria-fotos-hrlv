@@ -152,6 +152,29 @@ La generación de derivados ocurre en el navegador. El original se carga por
 separado y nunca se modifica. Retirar un álbum elimina su snapshot de Database,
 pero conserva el borrador privado y sus archivos.
 
+### Ubicación de las fotografías
+
+Las nuevas subidas leen la fecha y las coordenadas GPS del original. La ubicación
+se consulta en Nominatim y se guarda como localidad y país; si la consulta falla,
+la subida termina y muestra los nombres de las fotos pendientes de recuperar.
+
+Para fotos ya guardadas, **Recuperar ubicación** consulta el original privado de
+una foto con Lugar vacío. **Completar ubicaciones vacías** hace lo mismo para todo
+el álbum, incluidas sus fotos ocultas. Conserva los lugares escritos y las fechas.
+Los resultados quedan pendientes en el editor: revísalos y usa **Guardar borrador**
+o **Guardar cambios** para conservarlos y actualizar sus apariciones compartidas.
+El resumen distingue fotos sin GPS y errores de descarga, lectura o consulta;
+puedes reintentar las que fallen. La descarga usa la configuración CORS de Storage
+descrita arriba.
+
+Las consultas son secuenciales, con al menos un segundo entre inicios, caché durante
+la sesión del editor y un tiempo máximo de diez segundos por consulta. Este uso
+manual debe respetar la [política de Nominatim](https://operations.osmfoundation.org/policies/nominatim/),
+incluidos el límite de una petición por segundo para toda la aplicación, la
+identificación mediante Referer y la atribución a OpenStreetMap. Los JPEG de
+`test/fixtures` son imágenes sintéticas de 16 × 16 píxeles; el de Madrid contiene
+solo GPS y fecha de prueba, sin incluir la fotografía personal original.
+
 ### Fotografías compartidas
 
 Desde cada álbum, **Elegir fotos existentes** permite buscar por nombre y agregar
