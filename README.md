@@ -48,9 +48,11 @@ Antes de publicar la funcionalidad real:
 
 ### CORS de Storage
 
-La regeneración del crédito descarga el original privado desde el navegador.
+La recuperación de ubicaciones y la regeneración del crédito descargan el original
+privado desde el navegador.
 El bucket debe permitir solicitudes `GET` y `HEAD` desde los dominios de
-Hosting y el servidor local incluidos en `storage.cors.json`.
+Hosting, `https://galeria.hectorrlove.com` y el servidor local incluidos en
+`storage.cors.json`.
 
 Esta configuración pertenece al bucket y no se aplica con
 `firebase deploy`. Después de autenticar Google Cloud CLI en el proyecto,
