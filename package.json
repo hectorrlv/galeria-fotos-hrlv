@@ -38,7 +38,7 @@
     "@web/dev-server": "^1.0.0",
     "@web/rollup-plugin-html": "^4.0.0",
     "dotenv": "^18.0.9",
-    "eslint": "^10.14.0",
+    "eslint": "^10.15.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-lit": "^2.3.1",
     "globals": "^17.14.0",
